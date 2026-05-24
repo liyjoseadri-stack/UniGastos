@@ -7,13 +7,13 @@ import android.database.sqlite.SQLiteOpenHelper
 import java.util.Date
 
 data class Gasto(val id: Int, val fecha: Date, val concepto: String, val cantidad: Double)
-data class Ingreso(val id: Int, val fecha: Date, val cantidad: Double)
+data class Ingreso(val id: Int, val fecha: Date, val concepto: String, val cantidad: Double)
 
 class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     companion object {
         private const val DATABASE_NAME = "unigastos.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 3
         private var instance: SQLiteManager? = null
 
         fun getInstance(context: Context): SQLiteManager {
@@ -27,10 +27,22 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE usuarios (nombre TEXT PRIMARY KEY, activo INTEGER DEFAULT 0)")
         db.execSQL("CREATE TABLE gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
-        db.execSQL("CREATE TABLE ingresos (id INTEGER PRIMARY KEY AUTOINCREMENT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
+        db.execSQL("CREATE TABLE ingresos (id INTEGER PRIMARY KEY AUTOINCREMENT, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            try {
+                db.execSQL("ALTER TABLE ingresos ADD COLUMN concepto TEXT DEFAULT 'Ingreso'")
+            } catch (e: Exception) {}
+        }
+        if (oldVersion < 3) {
+            // Asegurarnos de que las tablas tengan la estructura correcta
+            try {
+                db.execSQL("ALTER TABLE gastos ADD COLUMN concepto TEXT DEFAULT 'Gasto'")
+            } catch (e: Exception) {}
+        }
+    }
 
     fun crearUsuario(nombre: String) {
         val db = writableDatabase
@@ -107,12 +119,18 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         val db = readableDatabase
         val cursor = db.rawQuery("SELECT * FROM gastos WHERE usuario_nombre = ?", arrayOf(usuario))
         val gastos = mutableListOf<Gasto>()
+        
+        val idIdx = cursor.getColumnIndex("id")
+        val conceptoIdx = cursor.getColumnIndex("concepto")
+        val cantidadIdx = cursor.getColumnIndex("cantidad")
+        val fechaIdx = cursor.getColumnIndex("fecha")
+
         while (cursor.moveToNext()) {
             gastos.add(Gasto(
-                cursor.getInt(0),
-                Date(cursor.getLong(3)),
-                cursor.getString(1),
-                cursor.getDouble(2)
+                if (idIdx != -1) cursor.getInt(idIdx) else 0,
+                if (fechaIdx != -1) Date(cursor.getLong(fechaIdx)) else Date(),
+                if (conceptoIdx != -1) cursor.getString(conceptoIdx) ?: "Gasto" else "Gasto",
+                if (cantidadIdx != -1) cursor.getDouble(cantidadIdx) else 0.0
             ))
         }
         cursor.close()
@@ -131,10 +149,11 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         writableDatabase.update("gastos", values, "id = ?", arrayOf(id.toString()))
     }
 
-    fun insertarIngreso(cantidad: Double, fecha: Date) {
+    fun insertarIngreso(concepto: String, cantidad: Double, fecha: Date) {
         val usuario = obtenerUsuarioActivo()
         val db = writableDatabase
         val values = ContentValues().apply {
+            put("concepto", concepto)
             put("cantidad", cantidad)
             put("fecha", fecha.time)
             put("usuario_nombre", usuario)
@@ -147,11 +166,18 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         val db = readableDatabase
         val cursor = db.rawQuery("SELECT * FROM ingresos WHERE usuario_nombre = ?", arrayOf(usuario))
         val ingresos = mutableListOf<Ingreso>()
+        
+        val idIdx = cursor.getColumnIndex("id")
+        val conceptoIdx = cursor.getColumnIndex("concepto")
+        val cantidadIdx = cursor.getColumnIndex("cantidad")
+        val fechaIdx = cursor.getColumnIndex("fecha")
+
         while (cursor.moveToNext()) {
             ingresos.add(Ingreso(
-                cursor.getInt(0),
-                Date(cursor.getLong(2)),
-                cursor.getDouble(1)
+                if (idIdx != -1) cursor.getInt(idIdx) else 0,
+                if (fechaIdx != -1) Date(cursor.getLong(fechaIdx)) else Date(),
+                if (conceptoIdx != -1) cursor.getString(conceptoIdx) ?: "Ingreso" else "Ingreso",
+                if (cantidadIdx != -1) cursor.getDouble(cantidadIdx) else 0.0
             ))
         }
         cursor.close()
@@ -162,8 +188,9 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         writableDatabase.delete("ingresos", "id = ?", arrayOf(id.toString()))
     }
 
-    fun actualizarIngreso(id: Int, cantidad: Double) {
+    fun actualizarIngreso(id: Int, concepto: String, cantidad: Double) {
         val values = ContentValues().apply {
+            put("concepto", concepto)
             put("cantidad", cantidad)
         }
         writableDatabase.update("ingresos", values, "id = ?", arrayOf(id.toString()))

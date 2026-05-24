@@ -126,6 +126,7 @@ fun LoginScreen(navController: NavHostController, db: SQLiteManager) {
                     placeholder = { Text("Ingresa tu usuario", color = Color.Gray) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(35.dp),
+                    singleLine = true,
                     colors = TextFieldDefaults.colors(
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent
@@ -134,10 +135,11 @@ fun LoginScreen(navController: NavHostController, db: SQLiteManager) {
 
                 Button(
                     onClick = {
-                        if (usuario.isNotEmpty()) {
-                            db.crearUsuario(usuario)
-                            db.iniciarSesion(usuario)
-                            navController.navigate("home/$usuario")
+                        val cleanedUser = usuario.trim()
+                        if (cleanedUser.isNotEmpty()) {
+                            db.crearUsuario(cleanedUser)
+                            db.iniciarSesion(cleanedUser)
+                            navController.navigate("home/$cleanedUser")
                         }
                     },
                     modifier = Modifier.fillMaxWidth().padding(top = 15.dp),
@@ -198,11 +200,14 @@ fun LoginScreen(navController: NavHostController, db: SQLiteManager) {
                 Surface(shape = RoundedCornerShape(20.dp), color = TarjetaInicio) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text("Editar Usuario", color = Color.White, fontSize = 20.sp)
-                        TextField(value = nuevoNombre, onValueChange = { nuevoNombre = it })
+                        TextField(value = nuevoNombre, onValueChange = { nuevoNombre = it }, singleLine = true)
                         Button(onClick = {
-                            db.editarUsuario(viejo, nuevoNombre)
-                            usuariosGuardados = db.obtenerUsuarios()
-                            usuarioAEditar = null
+                            val cleanedNewName = nuevoNombre.trim()
+                            if (cleanedNewName.isNotEmpty()) {
+                                db.editarUsuario(viejo, cleanedNewName)
+                                usuariosGuardados = db.obtenerUsuarios()
+                                usuarioAEditar = null
+                            }
                         }) { Text("Actualizar") }
                     }
                 }
@@ -281,7 +286,7 @@ fun ResumenView(ingresos: List<Ingreso>, gastos: List<Gasto>) {
         ) {
             Column(modifier = Modifier.padding(25.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Saldo Actual:", color = Color.White, fontSize = 24.sp)
-                Text("$${String.format("%.0f", balance)}", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                Text("$${String.format("%.2f", balance)}", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -319,13 +324,13 @@ fun TransaccionesView(esIngreso: Boolean, ingresos: List<Ingreso>, gastos: List<
     val total = if (esIngreso) ingresos.sumOf { it.cantidad } else gastos.sumOf { it.cantidad }
 
     Column(modifier = Modifier.fillMaxSize().padding(15.dp)) {
-        Text(if (esIngreso) "Ingreso Total: $$total" else "Gasto Total: $$total",
+        Text(if (esIngreso) "Ingreso Total: $${String.format("%.2f", total)}" else "Gasto Total: $${String.format("%.2f", total)}",
             fontSize = 28.sp, color = Color.White, modifier = Modifier.padding(bottom = 10.dp))
 
         LazyColumn(modifier = Modifier.weight(1f)) {
             if (esIngreso) {
                 items(ingresos.reversed()) { item ->
-                    TransactionRow("Ingreso", item.cantidad, item.fecha)
+                    TransactionRow(item.concepto, item.cantidad, item.fecha)
                 }
             } else {
                 items(gastos.reversed()) { item ->
@@ -345,7 +350,7 @@ fun TransaccionesView(esIngreso: Boolean, ingresos: List<Ingreso>, gastos: List<
 
     if (mostrarForm) {
         FormularioDialog(esIngreso, onDismiss = { mostrarForm = false }) { concepto, monto ->
-            if (esIngreso) db.insertarIngreso(monto, Date())
+            if (esIngreso) db.insertarIngreso(concepto, monto, Date())
             else db.insertarGasto(concepto, monto, Date())
             onUpdate()
             mostrarForm = false
@@ -362,7 +367,7 @@ fun TransactionRow(titulo: String, monto: Double, fecha: Date) {
             Text(sdf.format(fecha), color = Color.White.copy(0.6f), fontSize = 12.sp)
         }
         Spacer(modifier = Modifier.weight(1f))
-        Text("$${String.format("%.0f", monto)}", color = if (monto > 0) Color.Green else Color.Red)
+        Text("$${String.format("%.2f", monto)}", color = if (monto > 0) Color.Green else Color.Red)
     }
 }
 
@@ -376,26 +381,37 @@ fun FilterButton(text: String, activo: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun FormularioDialog(esGasto: Boolean, onDismiss: () -> Unit, onSave: (String, Double) -> Unit) {
+fun FormularioDialog(esIngreso: Boolean, onDismiss: () -> Unit, onSave: (String, Double) -> Unit) {
     var concepto by remember { mutableStateOf("") }
     var monto by remember { mutableStateOf("") }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(30.dp), color = TarjetaInicio) {
             Column(modifier = Modifier.padding(25.dp)) {
-                Text(if (esGasto) "Nuevo Gasto" else "Nuevo Ingreso", fontSize = 24.sp, color = Color.White)
-                if (esGasto) {
-                    TextField(value = concepto, onValueChange = { concepto = it }, label = { Text("Concepto") })
-                }
+                Text(if (!esIngreso) "Nuevo Gasto" else "Nuevo Ingreso", fontSize = 24.sp, color = Color.White)
+                
+                TextField(
+                    value = concepto, 
+                    onValueChange = { concepto = it }, 
+                    label = { Text("Concepto") },
+                    singleLine = true
+                )
+                
                 TextField(
                     value = monto,
-                    onValueChange = { monto = it },
+                    onValueChange = { input ->
+                        if (input.isEmpty() || input.matches(Regex("^\\d*\\.?\\d*$"))) {
+                            monto = input
+                        }
+                    },
                     label = { Text("Cantidad") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true
                 )
                 Button(onClick = {
                     val m = monto.toDoubleOrNull() ?: 0.0
-                    onSave(concepto.ifEmpty { "Ingreso" }, m)
+                    val defaultConcept = if (esIngreso) "Ingreso" else "Gasto"
+                    onSave(concepto.ifEmpty { defaultConcept }, m)
                 }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
                     Text("Guardar")
                 }
