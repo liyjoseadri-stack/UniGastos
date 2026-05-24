@@ -13,7 +13,7 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
 
     companion object {
         private const val DATABASE_NAME = "unigastos.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
         private var instance: SQLiteManager? = null
 
         fun getInstance(context: Context): SQLiteManager {
@@ -25,7 +25,7 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
     }
 
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE usuarios (nombre TEXT PRIMARY KEY, activo INTEGER DEFAULT 0)")
+        db.execSQL("CREATE TABLE usuarios (nombre TEXT PRIMARY KEY, password TEXT, activo INTEGER DEFAULT 0)")
         db.execSQL("CREATE TABLE gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
         db.execSQL("CREATE TABLE ingresos (id INTEGER PRIMARY KEY AUTOINCREMENT, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
     }
@@ -40,6 +40,11 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
             // Asegurarnos de que las tablas tengan la estructura correcta
             try {
                 db.execSQL("ALTER TABLE gastos ADD COLUMN concepto TEXT DEFAULT 'Gasto'")
+            } catch (e: Exception) {}
+        }
+        if (oldVersion < 4) {
+            try {
+                db.execSQL("ALTER TABLE usuarios ADD COLUMN password TEXT DEFAULT ''")
             } catch (e: Exception) {}
         }
     }
@@ -194,5 +199,38 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
             put("cantidad", cantidad)
         }
         writableDatabase.update("ingresos", values, "id = ?", arrayOf(id.toString()))
+    }
+
+    // --- Autenticación de usuarios ---
+    fun usuarioExiste(nombre: String): Boolean {
+        val db = readableDatabase
+        val cursor = db.rawQuery("SELECT 1 FROM usuarios WHERE nombre = ? LIMIT 1", arrayOf(nombre))
+        val existe = cursor.moveToFirst()
+        cursor.close()
+        return existe
+    }
+
+    fun registrarUsuario(nombre: String, password: String): Boolean {
+        if (nombre.isBlank() || password.isBlank()) return false
+        if (usuarioExiste(nombre)) return false
+
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put("nombre", nombre)
+            put("password", password)
+        }
+        val result = db.insert("usuarios", null, values)
+        return result != -1L
+    }
+
+    fun validarCredenciales(nombre: String, password: String): Boolean {
+        val db = readableDatabase
+        val cursor = db.rawQuery(
+            "SELECT 1 FROM usuarios WHERE nombre = ? AND password = ? LIMIT 1",
+            arrayOf(nombre, password)
+        )
+        val valido = cursor.moveToFirst()
+        cursor.close()
+        return valido
     }
 }
