@@ -1,5 +1,6 @@
 package com.example.unigastos
 
+import android.app.DatePickerDialog
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -19,12 +20,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -417,27 +414,70 @@ fun ResumenView(ingresos: List<Ingreso>, gastos: List<Gasto>) {
 @Composable
 fun TransaccionesView(esIngreso: Boolean, ingresos: List<Ingreso>, gastos: List<Gasto>, db: SQLiteManager, onUpdate: () -> Unit) {
     var mostrarForm by remember { mutableStateOf(false) }
-    val total = if (esIngreso) ingresos.sumOf { it.cantidad } else gastos.sumOf { it.cantidad }
+    var itemAEditar by remember { mutableStateOf<Transaccion?>(null) }
+    var itemAEliminar by remember { mutableStateOf<Transaccion?>(null) }
+    var busqueda by remember { mutableStateOf("") }
+    var filtroFecha by remember { mutableStateOf("Todos") }
+
+    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+    val listaOriginal: List<Transaccion> = if (esIngreso) ingresos else gastos
+    val listaFiltrada = listaOriginal.filter { 
+        (busqueda.isEmpty() || it.concepto.contains(busqueda, ignoreCase = true)) &&
+        (filtroFecha == "Todos" || filtrarPorTiempo(it.fecha, filtroFecha))
+    }
+
+    val total = listaFiltrada.sumOf { it.cantidad }
 
     Column(modifier = Modifier.fillMaxSize().padding(15.dp)) {
         Text(if (esIngreso) "Ingreso Total: $${String.format("%.2f", total)}" else "Gasto Total: $${String.format("%.2f", total)}",
-            fontSize = 28.sp, color = Color.White, modifier = Modifier.padding(bottom = 10.dp))
+            fontSize = 24.sp, color = Color.White, modifier = Modifier.padding(bottom = 5.dp))
+
+        // Buscador
+        TextField(
+            value = busqueda,
+            onValueChange = { busqueda = it },
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            placeholder = { Text("Buscar por concepto...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            shape = RoundedCornerShape(12.dp),
+            colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
+        )
+
+        // Filtro de fecha
+        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+            FilterButton("Todos", filtroFecha == "Todos") { filtroFecha = "Todos" }
+            FilterButton("Día", filtroFecha == "Día") { filtroFecha = "Día" }
+            FilterButton("Semana", filtroFecha == "Semana") { filtroFecha = "Semana" }
+            FilterButton("Mes", filtroFecha == "Mes") { filtroFecha = "Mes" }
+        }
 
         LazyColumn(modifier = Modifier.weight(1f)) {
-            if (esIngreso) {
-                items(ingresos.reversed()) { item ->
-                    TransactionRow(item.concepto, item.cantidad, item.fecha)
-                }
-            } else {
-                items(gastos.reversed()) { item ->
-                    TransactionRow(item.concepto, -item.cantidad, item.fecha)
+            items(listaFiltrada.reversed()) { item ->
+                val cantidadMostrada = if (esIngreso) item.cantidad else -item.cantidad
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { itemAEditar = item },
+                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.1f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.concepto, color = Color.White, fontWeight = FontWeight.Bold)
+                            Text(sdf.format(item.fecha), color = Color.White.copy(0.6f), fontSize = 12.sp)
+                        }
+                        Text("$${String.format("%.2f", cantidadMostrada)}", color = if (cantidadMostrada > 0) Color.Green else Color.Red, fontWeight = FontWeight.Bold)
+                        IconButton(onClick = { itemAEliminar = item }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(0.7f))
+                        }
+                    }
                 }
             }
         }
 
         Button(
             onClick = { mostrarForm = true },
-            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
             shape = RoundedCornerShape(10.dp)
         ) {
             Text("Añadir ${if (esIngreso) "Ingreso" else "Gasto"}")
@@ -445,25 +485,47 @@ fun TransaccionesView(esIngreso: Boolean, ingresos: List<Ingreso>, gastos: List<
     }
 
     if (mostrarForm) {
-        FormularioDialog(esIngreso, onDismiss = { mostrarForm = false }) { concepto, monto ->
-            if (esIngreso) db.insertarIngreso(concepto, monto, Date())
-            else db.insertarGasto(concepto, monto, Date())
+        FormularioDialog(esIngreso, onDismiss = { mostrarForm = false }) { concepto, monto, fecha ->
+            if (esIngreso) db.insertarIngreso(concepto, monto, fecha)
+            else db.insertarGasto(concepto, monto, fecha)
             onUpdate()
             mostrarForm = false
         }
     }
-}
 
-@Composable
-fun TransactionRow(titulo: String, monto: Double, fecha: Date) {
-    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Column {
-            Text(titulo, color = Color.White, fontWeight = FontWeight.Bold)
-            Text(sdf.format(fecha), color = Color.White.copy(0.6f), fontSize = 12.sp)
+    itemAEditar?.let { item ->
+        FormularioDialog(
+            esIngreso = esIngreso,
+            onDismiss = { itemAEditar = null },
+            conceptoIni = item.concepto,
+            montoIni = item.cantidad.toString(),
+            fechaIni = item.fecha,
+            esEdicion = true
+        ) { concepto, monto, fecha ->
+            if (esIngreso) db.actualizarIngreso(item.id, concepto, monto, fecha)
+            else db.actualizarGasto(item.id, concepto, monto, fecha)
+            onUpdate()
+            itemAEditar = null
         }
-        Spacer(modifier = Modifier.weight(1f))
-        Text("$${String.format("%.2f", monto)}", color = if (monto > 0) Color.Green else Color.Red)
+    }
+
+    itemAEliminar?.let { item ->
+        AlertDialog(
+            onDismissRequest = { itemAEliminar = null },
+            title = { Text("Confirmar eliminación") },
+            text = { Text("¿Estás seguro de que deseas eliminar este registro?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (esIngreso) db.eliminarIngreso(item.id)
+                    else db.eliminarGasto(item.id)
+                    onUpdate()
+                    itemAEliminar = null
+                }) { Text("Eliminar", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { itemAEliminar = null }) { Text("Cancelar") }
+            }
+        )
     }
 }
 
@@ -471,27 +533,49 @@ fun TransactionRow(titulo: String, monto: Double, fecha: Date) {
 fun FilterButton(text: String, activo: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = if (activo) Color.Blue else Color.Gray),
-        modifier = Modifier.padding(4.dp)
-    ) { Text(text) }
+        colors = ButtonDefaults.buttonColors(containerColor = if (activo) Color(0xFF4A4ED4) else Color.Gray.copy(0.3f)),
+        modifier = Modifier.padding(2.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) { Text(text, fontSize = 12.sp, color = Color.White) }
 }
 
 @Composable
-fun FormularioDialog(esIngreso: Boolean, onDismiss: () -> Unit, onSave: (String, Double) -> Unit) {
-    var concepto by remember { mutableStateOf("") }
-    var monto by remember { mutableStateOf("") }
+fun FormularioDialog(
+    esIngreso: Boolean,
+    onDismiss: () -> Unit,
+    conceptoIni: String = "",
+    montoIni: String = "",
+    fechaIni: Date = Date(),
+    esEdicion: Boolean = false,
+    onSave: (String, Double, Date) -> Unit
+) {
+    var concepto by remember { mutableStateOf(conceptoIni) }
+    var monto by remember { mutableStateOf(montoIni) }
+    var fecha by remember { mutableStateOf(fechaIni) }
+    val context = LocalContext.current
+    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
     Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(30.dp), color = TarjetaInicio) {
-            Column(modifier = Modifier.padding(25.dp)) {
-                Text(if (!esIngreso) "Nuevo Gasto" else "Nuevo Ingreso", fontSize = 24.sp, color = Color.White)
+        Surface(shape = RoundedCornerShape(20.dp), color = TarjetaInicio) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = if (esEdicion) "Editar ${if (esIngreso) "Ingreso" else "Gasto"}" 
+                           else "Nuevo ${if (esIngreso) "Ingreso" else "Gasto"}",
+                    fontSize = 20.sp, 
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(15.dp))
                 
                 TextField(
                     value = concepto, 
                     onValueChange = { concepto = it }, 
                     label = { Text("Concepto") },
+                    modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
+                Spacer(modifier = Modifier.height(10.dp))
                 
                 TextField(
                     value = monto,
@@ -501,15 +585,46 @@ fun FormularioDialog(esIngreso: Boolean, onDismiss: () -> Unit, onSave: (String,
                         }
                     },
                     label = { Text("Cantidad") },
+                    modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true
                 )
-                Button(onClick = {
-                    val m = monto.toDoubleOrNull() ?: 0.0
-                    val defaultConcept = if (esIngreso) "Ingreso" else "Gasto"
-                    onSave(concepto.ifEmpty { defaultConcept }, m)
-                }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                    Text("Guardar")
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        val calendar = Calendar.getInstance().apply { time = fecha }
+                        DatePickerDialog(
+                            context,
+                            { _, year, month, dayOfMonth ->
+                                val newCalendar = Calendar.getInstance().apply {
+                                    set(Calendar.YEAR, year)
+                                    set(Calendar.MONTH, month)
+                                    set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                                }
+                                fecha = newCalendar.time
+                            },
+                            calendar.get(Calendar.YEAR),
+                            calendar.get(Calendar.MONTH),
+                            calendar.get(Calendar.DAY_OF_MONTH)
+                        ).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                ) {
+                    Text("Fecha: ${sdf.format(fecha)}", color = Color.White)
+                }
+
+                Spacer(modifier = Modifier.height(15.dp))
+                
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Cancelar", color = Color.White.copy(0.7f)) }
+                    Button(onClick = {
+                        val m = monto.toDoubleOrNull() ?: 0.0
+                        onSave(concepto.ifEmpty { if (esIngreso) "Ingreso" else "Gasto" }, m, fecha)
+                    }) {
+                        Text("Guardar")
+                    }
                 }
             }
         }
@@ -520,9 +635,12 @@ fun filtrarPorTiempo(fecha: Date, periodo: String): Boolean {
     val cal = Calendar.getInstance()
     val itemCal = Calendar.getInstance().apply { time = fecha }
     return when (periodo) {
-        "Día" -> cal.get(Calendar.DAY_OF_YEAR) == itemCal.get(Calendar.DAY_OF_YEAR)
-        "Semana" -> cal.get(Calendar.WEEK_OF_YEAR) == itemCal.get(Calendar.WEEK_OF_YEAR)
-        "Mes" -> cal.get(Calendar.MONTH) == itemCal.get(Calendar.MONTH)
+        "Día" -> cal.get(Calendar.DAY_OF_YEAR) == itemCal.get(Calendar.DAY_OF_YEAR) &&
+                 cal.get(Calendar.YEAR) == itemCal.get(Calendar.YEAR)
+        "Semana" -> cal.get(Calendar.WEEK_OF_YEAR) == itemCal.get(Calendar.WEEK_OF_YEAR) &&
+                    cal.get(Calendar.YEAR) == itemCal.get(Calendar.YEAR)
+        "Mes" -> cal.get(Calendar.MONTH) == itemCal.get(Calendar.MONTH) &&
+                 cal.get(Calendar.YEAR) == itemCal.get(Calendar.YEAR)
         else -> true
     }
 }

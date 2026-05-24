@@ -6,8 +6,15 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.util.Date
 
-data class Gasto(val id: Int, val fecha: Date, val concepto: String, val cantidad: Double)
-data class Ingreso(val id: Int, val fecha: Date, val concepto: String, val cantidad: Double)
+interface Transaccion {
+    val id: Int
+    val fecha: Date
+    val concepto: String
+    val cantidad: Double
+}
+
+data class Gasto(override val id: Int, override val fecha: Date, override val concepto: String, override val cantidad: Double) : Transaccion
+data class Ingreso(override val id: Int, override val fecha: Date, override val concepto: String, override val cantidad: Double) : Transaccion
 
 class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
@@ -32,31 +39,17 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
-            try {
-                db.execSQL("ALTER TABLE ingresos ADD COLUMN concepto TEXT DEFAULT 'Ingreso'")
-            } catch (e: Exception) {}
+            try { db.execSQL("ALTER TABLE ingresos ADD COLUMN concepto TEXT DEFAULT 'Ingreso'") } catch (e: Exception) {}
         }
         if (oldVersion < 3) {
-            // Asegurarnos de que las tablas tengan la estructura correcta
-            try {
-                db.execSQL("ALTER TABLE gastos ADD COLUMN concepto TEXT DEFAULT 'Gasto'")
-            } catch (e: Exception) {}
+            try { db.execSQL("ALTER TABLE gastos ADD COLUMN concepto TEXT DEFAULT 'Gasto'") } catch (e: Exception) {}
         }
         if (oldVersion < 4) {
-            try {
-                db.execSQL("ALTER TABLE usuarios ADD COLUMN password TEXT DEFAULT ''")
-            } catch (e: Exception) {}
+            try { db.execSQL("ALTER TABLE usuarios ADD COLUMN password TEXT DEFAULT ''") } catch (e: Exception) {}
         }
     }
 
-    fun crearUsuario(nombre: String) {
-        val db = writableDatabase
-        val values = ContentValues().apply {
-            put("nombre", nombre)
-        }
-        db.insertWithOnConflict("usuarios", null, values, SQLiteDatabase.CONFLICT_IGNORE)
-    }
-
+    // --- Gestión de Usuarios ---
     fun iniciarSesion(nombre: String) {
         val db = writableDatabase
         db.execSQL("UPDATE usuarios SET activo = 0")
@@ -72,136 +65,11 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         val db = readableDatabase
         val cursor = db.rawQuery("SELECT nombre FROM usuarios WHERE activo = 1", null)
         var nombre = ""
-        if (cursor.moveToFirst()) {
-            nombre = cursor.getString(0)
-        }
+        if (cursor.moveToFirst()) { nombre = cursor.getString(0) }
         cursor.close()
         return nombre
     }
 
-    fun obtenerUsuarios(): List<String> {
-        val db = readableDatabase
-        val cursor = db.rawQuery("SELECT nombre FROM usuarios", null)
-        val usuarios = mutableListOf<String>()
-        while (cursor.moveToNext()) {
-            usuarios.add(cursor.getString(0))
-        }
-        cursor.close()
-        return usuarios
-    }
-
-    fun eliminarUsuario(nombre: String) {
-        val db = writableDatabase
-        db.delete("usuarios", "nombre = ?", arrayOf(nombre))
-        db.delete("gastos", "usuario_nombre = ?", arrayOf(nombre))
-        db.delete("ingresos", "usuario_nombre = ?", arrayOf(nombre))
-    }
-
-    fun editarUsuario(nombreActual: String, nuevoNombre: String) {
-        val db = writableDatabase
-        val values = ContentValues().apply { put("nombre", nuevoNombre) }
-        db.update("usuarios", values, "nombre = ?", arrayOf(nombreActual))
-        
-        val recordValues = ContentValues().apply { put("usuario_nombre", nuevoNombre) }
-        db.update("gastos", recordValues, "usuario_nombre = ?", arrayOf(nombreActual))
-        db.update("ingresos", recordValues, "usuario_nombre = ?", arrayOf(nombreActual))
-    }
-
-    fun insertarGasto(concepto: String, cantidad: Double, fecha: Date) {
-        val usuario = obtenerUsuarioActivo()
-        val db = writableDatabase
-        val values = ContentValues().apply {
-            put("concepto", concepto)
-            put("cantidad", cantidad)
-            put("fecha", fecha.time)
-            put("usuario_nombre", usuario)
-        }
-        db.insert("gastos", null, values)
-    }
-
-    fun obtenerGastos(): List<Gasto> {
-        val usuario = obtenerUsuarioActivo()
-        val db = readableDatabase
-        val cursor = db.rawQuery("SELECT * FROM gastos WHERE usuario_nombre = ?", arrayOf(usuario))
-        val gastos = mutableListOf<Gasto>()
-        
-        val idIdx = cursor.getColumnIndex("id")
-        val conceptoIdx = cursor.getColumnIndex("concepto")
-        val cantidadIdx = cursor.getColumnIndex("cantidad")
-        val fechaIdx = cursor.getColumnIndex("fecha")
-
-        while (cursor.moveToNext()) {
-            gastos.add(Gasto(
-                if (idIdx != -1) cursor.getInt(idIdx) else 0,
-                if (fechaIdx != -1) Date(cursor.getLong(fechaIdx)) else Date(),
-                if (conceptoIdx != -1) cursor.getString(conceptoIdx) ?: "Gasto" else "Gasto",
-                if (cantidadIdx != -1) cursor.getDouble(cantidadIdx) else 0.0
-            ))
-        }
-        cursor.close()
-        return gastos
-    }
-
-    fun eliminarGasto(id: Int) {
-        writableDatabase.delete("gastos", "id = ?", arrayOf(id.toString()))
-    }
-
-    fun actualizarGasto(id: Int, concepto: String, cantidad: Double) {
-        val values = ContentValues().apply {
-            put("concepto", concepto)
-            put("cantidad", cantidad)
-        }
-        writableDatabase.update("gastos", values, "id = ?", arrayOf(id.toString()))
-    }
-
-    fun insertarIngreso(concepto: String, cantidad: Double, fecha: Date) {
-        val usuario = obtenerUsuarioActivo()
-        val db = writableDatabase
-        val values = ContentValues().apply {
-            put("concepto", concepto)
-            put("cantidad", cantidad)
-            put("fecha", fecha.time)
-            put("usuario_nombre", usuario)
-        }
-        db.insert("ingresos", null, values)
-    }
-
-    fun obtenerIngresos(): List<Ingreso> {
-        val usuario = obtenerUsuarioActivo()
-        val db = readableDatabase
-        val cursor = db.rawQuery("SELECT * FROM ingresos WHERE usuario_nombre = ?", arrayOf(usuario))
-        val ingresos = mutableListOf<Ingreso>()
-        
-        val idIdx = cursor.getColumnIndex("id")
-        val conceptoIdx = cursor.getColumnIndex("concepto")
-        val cantidadIdx = cursor.getColumnIndex("cantidad")
-        val fechaIdx = cursor.getColumnIndex("fecha")
-
-        while (cursor.moveToNext()) {
-            ingresos.add(Ingreso(
-                if (idIdx != -1) cursor.getInt(idIdx) else 0,
-                if (fechaIdx != -1) Date(cursor.getLong(fechaIdx)) else Date(),
-                if (conceptoIdx != -1) cursor.getString(conceptoIdx) ?: "Ingreso" else "Ingreso",
-                if (cantidadIdx != -1) cursor.getDouble(cantidadIdx) else 0.0
-            ))
-        }
-        cursor.close()
-        return ingresos
-    }
-
-    fun eliminarIngreso(id: Int) {
-        writableDatabase.delete("ingresos", "id = ?", arrayOf(id.toString()))
-    }
-
-    fun actualizarIngreso(id: Int, concepto: String, cantidad: Double) {
-        val values = ContentValues().apply {
-            put("concepto", concepto)
-            put("cantidad", cantidad)
-        }
-        writableDatabase.update("ingresos", values, "id = ?", arrayOf(id.toString()))
-    }
-
-    // --- Autenticación de usuarios ---
     fun usuarioExiste(nombre: String): Boolean {
         val db = readableDatabase
         val cursor = db.rawQuery("SELECT 1 FROM usuarios WHERE nombre = ? LIMIT 1", arrayOf(nombre))
@@ -211,26 +79,96 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
     }
 
     fun registrarUsuario(nombre: String, password: String): Boolean {
-        if (nombre.isBlank() || password.isBlank()) return false
-        if (usuarioExiste(nombre)) return false
-
-        val db = writableDatabase
+        if (nombre.isBlank() || password.isBlank() || usuarioExiste(nombre)) return false
         val values = ContentValues().apply {
             put("nombre", nombre)
             put("password", password)
         }
-        val result = db.insert("usuarios", null, values)
-        return result != -1L
+        return writableDatabase.insert("usuarios", null, values) != -1L
     }
 
     fun validarCredenciales(nombre: String, password: String): Boolean {
-        val db = readableDatabase
-        val cursor = db.rawQuery(
-            "SELECT 1 FROM usuarios WHERE nombre = ? AND password = ? LIMIT 1",
-            arrayOf(nombre, password)
-        )
+        val cursor = readableDatabase.rawQuery("SELECT 1 FROM usuarios WHERE nombre = ? AND password = ? LIMIT 1", arrayOf(nombre, password))
         val valido = cursor.moveToFirst()
         cursor.close()
         return valido
+    }
+
+    // --- Gestión de Gastos ---
+    fun insertarGasto(concepto: String, cantidad: Double, fecha: Date) {
+        val values = ContentValues().apply {
+            put("concepto", concepto)
+            put("cantidad", cantidad)
+            put("fecha", fecha.time)
+            put("usuario_nombre", obtenerUsuarioActivo())
+        }
+        writableDatabase.insert("gastos", null, values)
+    }
+
+    fun obtenerGastos(): List<Gasto> {
+        val cursor = readableDatabase.rawQuery("SELECT * FROM gastos WHERE usuario_nombre = ?", arrayOf(obtenerUsuarioActivo()))
+        val lista = mutableListOf<Gasto>()
+        while (cursor.moveToNext()) {
+            lista.add(Gasto(
+                cursor.getInt(cursor.getColumnIndexOrThrow("id")),
+                Date(cursor.getLong(cursor.getColumnIndexOrThrow("fecha"))),
+                cursor.getString(cursor.getColumnIndexOrThrow("concepto")) ?: "Gasto",
+                cursor.getDouble(cursor.getColumnIndexOrThrow("cantidad"))
+            ))
+        }
+        cursor.close()
+        return lista
+    }
+
+    fun actualizarGasto(id: Int, concepto: String, cantidad: Double, fecha: Date) {
+        val values = ContentValues().apply {
+            put("concepto", concepto)
+            put("cantidad", cantidad)
+            put("fecha", fecha.time)
+        }
+        writableDatabase.update("gastos", values, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun eliminarGasto(id: Int) {
+        writableDatabase.delete("gastos", "id = ?", arrayOf(id.toString()))
+    }
+
+    // --- Gestión de Ingresos ---
+    fun insertarIngreso(concepto: String, cantidad: Double, fecha: Date) {
+        val values = ContentValues().apply {
+            put("concepto", concepto)
+            put("cantidad", cantidad)
+            put("fecha", fecha.time)
+            put("usuario_nombre", obtenerUsuarioActivo())
+        }
+        writableDatabase.insert("ingresos", null, values)
+    }
+
+    fun obtenerIngresos(): List<Ingreso> {
+        val cursor = readableDatabase.rawQuery("SELECT * FROM ingresos WHERE usuario_nombre = ?", arrayOf(obtenerUsuarioActivo()))
+        val lista = mutableListOf<Ingreso>()
+        while (cursor.moveToNext()) {
+            lista.add(Ingreso(
+                cursor.getInt(cursor.getColumnIndexOrThrow("id")),
+                Date(cursor.getLong(cursor.getColumnIndexOrThrow("fecha"))),
+                cursor.getString(cursor.getColumnIndexOrThrow("concepto")) ?: "Ingreso",
+                cursor.getDouble(cursor.getColumnIndexOrThrow("cantidad"))
+            ))
+        }
+        cursor.close()
+        return lista
+    }
+
+    fun actualizarIngreso(id: Int, concepto: String, cantidad: Double, fecha: Date) {
+        val values = ContentValues().apply {
+            put("concepto", concepto)
+            put("cantidad", cantidad)
+            put("fecha", fecha.time)
+        }
+        writableDatabase.update("ingresos", values, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun eliminarIngreso(id: Int) {
+        writableDatabase.delete("ingresos", "id = ?", arrayOf(id.toString()))
     }
 }
