@@ -29,9 +29,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.unigastos.ui.theme.UniGastosTheme
 import java.text.SimpleDateFormat
 import java.util.*
@@ -48,9 +50,16 @@ class MainActivity : ComponentActivity() {
                 NavHost(navController = navController, startDestination = "login") {
                     composable("login") { LoginScreen(navController, db) }
                     composable("register") { RegisterScreen(navController, db) }
-                    composable("home/{usuario}") { backStackEntry ->
+                    composable(
+                        "home/{usuario}/{soloLectura}",
+                        arguments = listOf(
+                            navArgument("usuario") { type = NavType.StringType },
+                            navArgument("soloLectura") { type = NavType.BoolType }
+                        )
+                    ) { backStackEntry ->
                         val user = backStackEntry.arguments?.getString("usuario") ?: ""
-                        HomeScreen(user, navController, db)
+                        val readOnly = backStackEntry.arguments?.getBoolean("soloLectura") ?: false
+                        HomeScreen(user, navController, db, readOnly)
                     }
                 }
             }
@@ -84,9 +93,10 @@ fun LoginScreen(navController: NavHostController, db: SQLiteManager) {
     var mensajeDialogo by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        val activo = db.obtenerUsuarioActivo()
-        if (activo.isNotEmpty()) {
-            navController.navigate("home/$activo")
+        val info = db.obtenerUsuarioActivoInfo()
+        if (info != null) {
+            val isReadOnly = info.rol == "TUTOR"
+            navController.navigate("home/${info.nombre}/$isReadOnly")
         }
     }
 
@@ -152,11 +162,15 @@ fun LoginScreen(navController: NavHostController, db: SQLiteManager) {
                         val p = loginContrasena.trim()
                         if (u.isEmpty() || p.isEmpty()) {
                             mensajeDialogo = "Ambos campos son obligatorios para iniciar sesión."
-                        } else if (db.validarCredenciales(u, p)) {
-                            db.iniciarSesion(u)
-                            navController.navigate("home/$u")
                         } else {
-                            mensajeDialogo = "Credenciales incorrectas. Verifica usuario y contraseña."
+                            val info = db.obtenerInfoUsuario(u, p)
+                            if (info != null) {
+                                db.iniciarSesion(u)
+                                val isReadOnly = info.rol == "TUTOR"
+                                navController.navigate("home/${info.nombre}/$isReadOnly")
+                            } else {
+                                mensajeDialogo = "Credenciales incorrectas. Verifica usuario y contraseña."
+                            }
                         }
                     },
                     modifier = Modifier
@@ -196,99 +210,144 @@ fun LoginScreen(navController: NavHostController, db: SQLiteManager) {
 fun RegisterScreen(navController: NavHostController, db: SQLiteManager) {
     var registroUsuario by remember { mutableStateOf("") }
     var registroContrasena by remember { mutableStateOf("") }
+    var nombreTutor by remember { mutableStateOf("") }
+    var contrasenaTutor by remember { mutableStateOf("") }
     var mensajeDialogo by remember { mutableStateOf<String?>(null) }
 
     GradientBackground {
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 30.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.AccountCircle,
-                contentDescription = null,
-                modifier = Modifier.size(110.dp),
-                tint = Color.White
-            )
-            Text("Crear cuenta", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Column(
-                modifier = Modifier
-                    .background(Brush.verticalGradient(listOf(TarjetaInicio, TarjetaFin)), RoundedCornerShape(35.dp))
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text("Registro", fontSize = 28.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(12.dp))
-
-                TextField(
-                    value = registroUsuario,
-                    onValueChange = { registroUsuario = it },
-                    placeholder = { Text("Crea un usuario", color = Color.Gray) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    singleLine = true,
-                    colors = TextFieldDefaults.colors(
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    )
+            item {
+                Icon(
+                    imageVector = Icons.Default.AccountCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(110.dp),
+                    tint = Color.White
                 )
+                Text("Crear cuenta", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Spacer(modifier = Modifier.height(24.dp))
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Column(
+                    modifier = Modifier
+                        .background(Brush.verticalGradient(listOf(TarjetaInicio, TarjetaFin)), RoundedCornerShape(35.dp))
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Tus Datos", fontSize = 22.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                TextField(
-                    value = registroContrasena,
-                    onValueChange = { registroContrasena = it },
-                    placeholder = { Text("Crea una contraseña", color = Color.Gray) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    colors = TextFieldDefaults.colors(
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
+                    TextField(
+                        value = registroUsuario,
+                        onValueChange = { registroUsuario = it },
+                        placeholder = { Text("Usuario", color = Color.Gray) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        singleLine = true,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
+                        )
                     )
-                )
 
-                Button(
-                    onClick = {
-                        val u = registroUsuario.trim()
-                        val p = registroContrasena.trim()
-                        when {
-                            u.isEmpty() || p.isEmpty() -> {
-                                mensajeDialogo = "Debes ingresar usuario y contraseña para registrarte."
-                            }
-                            db.usuarioExiste(u) -> {
-                                mensajeDialogo = "El usuario ya existe. Intenta con otro nombre."
-                            }
-                            else -> {
-                                val ok = db.registrarUsuario(u, p)
-                                if (ok) {
-                                    db.iniciarSesion(u)
-                                    navController.navigate("home/$u")
-                                } else {
-                                    mensajeDialogo = "No se pudo registrar la cuenta. Intenta nuevamente."
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    TextField(
+                        value = registroContrasena,
+                        onValueChange = { registroContrasena = it },
+                        placeholder = { Text("Contraseña", color = Color.Gray) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text("Datos del Tutor (Revisor)", fontSize = 22.sp, color = Color.Cyan, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    TextField(
+                        value = nombreTutor,
+                        onValueChange = { nombreTutor = it },
+                        placeholder = { Text("Nombre del Tutor", color = Color.Gray) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        singleLine = true,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    TextField(
+                        value = contrasenaTutor,
+                        onValueChange = { contrasenaTutor = it },
+                        placeholder = { Text("Contraseña del Tutor", color = Color.Gray) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
+                        )
+                    )
+
+                    Button(
+                        onClick = {
+                            val u = registroUsuario.trim()
+                            val p = registroContrasena.trim()
+                            val tU = nombreTutor.trim()
+                            val tP = contrasenaTutor.trim()
+
+                            when {
+                                u.isEmpty() || p.isEmpty() || tU.isEmpty() || tP.isEmpty() -> {
+                                    mensajeDialogo = "Todos los campos son obligatorios."
+                                }
+                                db.usuarioExiste(u) -> {
+                                    mensajeDialogo = "El usuario ya existe."
+                                }
+                                db.usuarioExiste(tU) -> {
+                                    mensajeDialogo = "El nombre del tutor ya está en uso."
+                                }
+                                else -> {
+                                    // 1. Registrar Alumno
+                                    val okAlumno = db.registrarUsuario(u, p, rol = "USUARIO", vinculadoA = u)
+                                    // 2. Registrar Tutor vinculado al alumno
+                                    val okTutor = db.registrarUsuario(tU, tP, rol = "TUTOR", vinculadoA = u)
+
+                                    if (okAlumno && okTutor) {
+                                        db.iniciarSesion(u)
+                                        navController.navigate("home/$u/false")
+                                    } else {
+                                        mensajeDialogo = "Error al registrar las cuentas."
+                                    }
                                 }
                             }
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 14.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Text("Crear Cuenta", fontSize = 18.sp)
-                }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 20.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text("Registrar Ambos", fontSize = 18.sp)
+                    }
 
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("¿Ya tienes cuenta?", color = Color.White.copy(0.8f))
+                    Spacer(modifier = Modifier.height(8.dp))
                     TextButton(onClick = { navController.navigate("login") }) {
-                        Text("Inicia sesión", color = Color.Cyan)
+                        Text("Volver al Login", color = Color.Cyan)
                     }
                 }
             }
@@ -311,7 +370,7 @@ fun RegisterScreen(navController: NavHostController, db: SQLiteManager) {
 
 // --- PANTALLA PRINCIPAL ---
 @Composable
-fun HomeScreen(nombre: String, navController: NavHostController, db: SQLiteManager) {
+fun HomeScreen(nombre: String, navController: NavHostController, db: SQLiteManager, soloLectura: Boolean) {
     var vistaActiva by remember { mutableStateOf("Resumen") }
     var ingresos by remember { mutableStateOf(db.obtenerIngresos()) }
     var gastos by remember { mutableStateOf(db.obtenerGastos()) }
@@ -327,7 +386,12 @@ fun HomeScreen(nombre: String, navController: NavHostController, db: SQLiteManag
             modifier = Modifier.fillMaxWidth().background(HeaderColor).padding(20.dp).padding(top = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Hola, $nombre", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Column {
+                Text("Hola, $nombre", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                if (soloLectura) {
+                    Text("Modo: Tutor (Solo Lectura)", color = Color.Cyan, fontSize = 14.sp)
+                }
+            }
             Spacer(modifier = Modifier.weight(1f))
             IconButton(onClick = {
                 db.cerrarSesion()
@@ -346,8 +410,8 @@ fun HomeScreen(nombre: String, navController: NavHostController, db: SQLiteManag
 
         when (vistaActiva) {
             "Resumen" -> ResumenView(ingresos, gastos)
-            "Ingresos" -> TransaccionesView(true, ingresos, emptyList(), db) { ingresos = db.obtenerIngresos() }
-            "Gastos" -> TransaccionesView(false, emptyList(), gastos, db) { gastos = db.obtenerGastos() }
+            "Ingresos" -> TransaccionesView(true, ingresos, emptyList(), db, soloLectura) { ingresos = db.obtenerIngresos() }
+            "Gastos" -> TransaccionesView(false, emptyList(), gastos, db, soloLectura) { gastos = db.obtenerGastos() }
         }
     }
 }
@@ -412,7 +476,7 @@ fun ResumenView(ingresos: List<Ingreso>, gastos: List<Gasto>) {
 }
 
 @Composable
-fun TransaccionesView(esIngreso: Boolean, ingresos: List<Ingreso>, gastos: List<Gasto>, db: SQLiteManager, onUpdate: () -> Unit) {
+fun TransaccionesView(esIngreso: Boolean, ingresos: List<Ingreso>, gastos: List<Gasto>, db: SQLiteManager, soloLectura: Boolean, onUpdate: () -> Unit) {
     var mostrarForm by remember { mutableStateOf(false) }
     var itemAEditar by remember { mutableStateOf<Transaccion?>(null) }
     var itemAEliminar by remember { mutableStateOf<Transaccion?>(null) }
@@ -457,7 +521,10 @@ fun TransaccionesView(esIngreso: Boolean, ingresos: List<Ingreso>, gastos: List<
                 val cantidadMostrada = if (esIngreso) item.cantidad else -item.cantidad
                 
                 Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { itemAEditar = item },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clickable(enabled = !soloLectura) { itemAEditar = item },
                     colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.1f)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -467,20 +534,25 @@ fun TransaccionesView(esIngreso: Boolean, ingresos: List<Ingreso>, gastos: List<
                             Text(sdf.format(item.fecha), color = Color.White.copy(0.6f), fontSize = 12.sp)
                         }
                         Text("$${String.format("%.2f", cantidadMostrada)}", color = if (cantidadMostrada > 0) Color.Green else Color.Red, fontWeight = FontWeight.Bold)
-                        IconButton(onClick = { itemAEliminar = item }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(0.7f))
+                        
+                        if (!soloLectura) {
+                            IconButton(onClick = { itemAEliminar = item }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(0.7f))
+                            }
                         }
                     }
                 }
             }
         }
 
-        Button(
-            onClick = { mostrarForm = true },
-            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-            shape = RoundedCornerShape(10.dp)
-        ) {
-            Text("Añadir ${if (esIngreso) "Ingreso" else "Gasto"}")
+        if (!soloLectura) {
+            Button(
+                onClick = { mostrarForm = true },
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Añadir ${if (esIngreso) "Ingreso" else "Gasto"}")
+            }
         }
     }
 
