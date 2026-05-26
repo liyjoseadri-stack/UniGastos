@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,17 +17,22 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -86,6 +93,28 @@ val TarjetaInicio = Color(0xFF282A5C)
 val TarjetaFin = Color(0xFF3A4178)
 val HeaderColor = Color(0xFF1E0F48)
 
+fun getIconForCategory(categoria: String, esIngreso: Boolean): ImageVector {
+    return if (esIngreso) {
+        when (categoria) {
+            "Sueldo" -> Icons.Rounded.Payments
+            "Beca" -> Icons.Rounded.School
+            "Apoyo" -> Icons.Rounded.VolunteerActivism
+            else -> Icons.Rounded.AddCard
+        }
+    } else {
+        when (categoria) {
+            "Comida" -> Icons.Rounded.Restaurant
+            "Transporte" -> Icons.Rounded.DirectionsCar
+            "Renta" -> Icons.Rounded.Home
+            "Material escolar" -> Icons.Rounded.MenuBook
+            "Servicios" -> Icons.Rounded.Bolt
+            "Salud" -> Icons.Rounded.MedicalServices
+            "Entretenimiento" -> Icons.Rounded.SportsEsports
+            else -> Icons.Rounded.Category
+        }
+    }
+}
+
 @Composable
 fun GradientBackground(content: @Composable BoxScope.() -> Unit) {
     Box(
@@ -128,7 +157,14 @@ fun LoginScreen(navController: NavHostController, db: SQLiteManager, firestore: 
                 modifier = Modifier.size(120.dp),
                 tint = Color.White
             )
-            Text("UniGastos", fontSize = 42.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text(
+                "UniGastos",
+                fontSize = 42.sp,
+                fontWeight = FontWeight.ExtraBold,
+                style = androidx.compose.ui.text.TextStyle(
+                    brush = Brush.linearGradient(listOf(Color.White, Color.Cyan))
+                )
+            )
             Spacer(modifier = Modifier.height(24.dp))
 
             Column(
@@ -512,13 +548,24 @@ fun HomeScreen(nombre: String, navController: NavHostController, db: SQLiteManag
             TabItem("Gastos", vistaActiva == "Gastos") { vistaActiva = "Gastos" }
         }
 
-        when (vistaActiva) {
-            "Resumen" -> ResumenView(usuarioDatos, ingresos, gastos, soloLectura)
-            "Ingresos" -> TransaccionesView(true, ingresos, emptyList(), db, firestore, usuarioDatos, soloLectura) {
-                ingresos = db.obtenerIngresosDeUsuario(usuarioDatos)
-            }
-            "Gastos" -> TransaccionesView(false, emptyList(), gastos, db, firestore, usuarioDatos, soloLectura) {
-                gastos = db.obtenerGastosDeUsuario(usuarioDatos)
+        AnimatedContent(
+            targetState = vistaActiva,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(220, delayMillis = 90)) +
+                        scaleIn(initialScale = 0.92f, animationSpec = tween(220, delayMillis = 90)) togetherWith
+                        fadeOut(animationSpec = tween(90))
+            },
+            label = "TabTransition",
+            modifier = Modifier.weight(1f)
+        ) { targetVista ->
+            when (targetVista) {
+                "Resumen" -> ResumenView(usuarioDatos, ingresos, gastos, soloLectura)
+                "Ingresos" -> TransaccionesView(true, ingresos, emptyList(), db, firestore, usuarioDatos, soloLectura) {
+                    ingresos = db.obtenerIngresosDeUsuario(usuarioDatos)
+                }
+                "Gastos" -> TransaccionesView(false, emptyList(), gastos, db, firestore, usuarioDatos, soloLectura) {
+                    gastos = db.obtenerGastosDeUsuario(usuarioDatos)
+                }
             }
         }
     }
@@ -535,12 +582,29 @@ fun HomeScreen(nombre: String, navController: NavHostController, db: SQLiteManag
 
 @Composable
 fun RowScope.TabItem(text: String, activo: Boolean, onClick: () -> Unit) {
+    val color by animateColorAsState(if (activo) Color.White else Color.White.copy(0.5f))
+    val ancho by animateDpAsState(if (activo) 40.dp else 0.dp)
+
     Column(
-        modifier = Modifier.weight(1f).clickable { onClick() },
+        modifier = Modifier
+            .weight(1f)
+            .clickable { onClick() }
+            .padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text, color = if (activo) Color.White else Color.White.copy(0.7f), fontWeight = FontWeight.Bold)
-        if (activo) Box(modifier = Modifier.height(3.dp).width(60.dp).background(Color.White))
+        Text(
+            text,
+            color = color,
+            fontWeight = if (activo) FontWeight.Bold else FontWeight.Normal,
+            fontSize = 15.sp
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .height(3.dp)
+                .width(ancho)
+                .background(Color.Cyan, RoundedCornerShape(2.dp))
+        )
     }
 }
 
@@ -567,28 +631,50 @@ fun ResumenView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>, s
             .verticalScroll(scrollState),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F1254)),
-            shape = RoundedCornerShape(35.dp)
+        // Tarjeta de Saldo con Animacion
+        AnimatedVisibility(
+            visible = true,
+            enter = fadeIn(tween(1000)) + expandVertically()
         ) {
-            Column(modifier = Modifier.padding(25.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Saldo Actual:", color = Color.White, fontSize = 24.sp)
-                Text("\$${String.format("%.2f", balance)}", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1F1254)),
+                shape = RoundedCornerShape(35.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(25.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(Icons.Rounded.AccountBalanceWallet, contentDescription = null, tint = Color.Cyan, modifier = Modifier.size(32.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Saldo Actual:", color = Color.White.copy(0.7f), fontSize = 16.sp)
+                    Text(
+                        "\$${String.format("%.2f", balance)}",
+                        color = Color.White,
+                        fontSize = 38.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // Presupuesto
         Card(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.1f)),
-            shape = RoundedCornerShape(20.dp)
+            modifier = Modifier.fillMaxWidth().animateContentSize(),
+            colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.08f)),
+            shape = RoundedCornerShape(24.dp)
         ) {
-            Column(modifier = Modifier.padding(15.dp)) {
-                Text("Presupuesto Mensual", color = Color.Cyan, fontWeight = FontWeight.Bold)
-
+            Column(modifier = Modifier.padding(18.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White.copy(0.6f), modifier = Modifier.size(16.dp))
+                    Icon(Icons.Rounded.SettingsSuggest, contentDescription = null, tint = Color.Cyan, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Presupuesto Mensual", color = Color.Cyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+                    Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White.copy(0.4f), modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     TextField(
                         value = presupuestoInput,
@@ -600,7 +686,7 @@ fun ResumenView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>, s
                         },
                         enabled = !soloLectura,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Definir presupuesto", color = Color.Gray, fontSize = 14.sp) },
+                        placeholder = { Text("Definir meta de ahorro", color = Color.Gray, fontSize = 14.sp) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         colors = TextFieldDefaults.colors(
@@ -608,58 +694,84 @@ fun ResumenView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>, s
                             unfocusedContainerColor = Color.Transparent,
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
-                            disabledTextColor = Color.White
+                            disabledTextColor = Color.White,
+                            focusedIndicatorColor = Color.Cyan.copy(0.5f)
                         )
                     )
                 }
 
                 if (presupuesto > 0) {
                     val progreso = (totalG / presupuesto).coerceIn(0.0, 1.0)
-                    LinearProgressIndicator(
-                        progress = { progreso.toFloat() },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        color = if (totalG > presupuesto) Color.Red else Color.Green,
-                        trackColor = Color.White.copy(0.2f)
-                    )
+                    Column {
+                        LinearProgressIndicator(
+                            progress = { progreso.toFloat() },
+                            modifier = Modifier.fillMaxWidth().height(10.dp).clip(CircleShape),
+                            color = if (totalG > presupuesto) Color(0xFFFF5252) else Color(0xFF4CAF50),
+                            trackColor = Color.White.copy(0.1f)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(
+                                if (totalG > presupuesto) "Excedido" else "Progreso: ${(progreso * 100).toInt()}%",
+                                color = Color.White.copy(0.6f),
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                "\$${String.format("%.0f", totalG)} / \$${String.format("%.0f", presupuesto)}",
+                                color = Color.White.copy(0.6f),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
 
                     if (totalG > presupuesto) {
                         Surface(
-                            color = Color.Red.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            color = Color.Red.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
                         ) {
-                            Text(
-                                "ATENCION: Has excedido tu presupuesto por \$${String.format("%.2f", totalG - presupuesto)}",
-                                color = Color(0xFFFFCDD2),
-                                modifier = Modifier.padding(8.dp),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.Warning, contentDescription = null, tint = Color(0xFFFFCDD2), modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "Has excedido tu presupuesto por \$${String.format("%.2f", totalG - presupuesto)}",
+                                    color = Color(0xFFFFCDD2),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
-                    } else {
-                        Text("Disponible: \$${String.format("%.2f", presupuesto - totalG)}", color = Color.White.copy(0.7f), fontSize = 12.sp)
                     }
-                } else {
-                    Text("Presupuesto no configurado", color = Color.White.copy(0.5f), fontSize = 12.sp)
                 }
             }
         }
 
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Donut Chart mejorado
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(200.dp)
-                .background(Brush.verticalGradient(listOf(Color(0xFF34396E), Color(0xFF526580))), RoundedCornerShape(35.dp)),
+                .height(220.dp)
+                .background(Brush.verticalGradient(listOf(Color(0xFF34396E), Color(0xFF425375))), RoundedCornerShape(35.dp)),
             contentAlignment = Alignment.Center
         ) {
             if (totalI + totalG > 0) {
-                Canvas(modifier = Modifier.size(150.dp)) {
+                Canvas(modifier = Modifier.size(160.dp)) {
                     val sweepI = (totalI / (totalI + totalG) * 360).toFloat()
-                    drawArc(Color.Blue, -90f, sweepI, true)
-                    drawArc(Color.Magenta, -90f + sweepI, 360f - sweepI, true)
+                    val strokeWidth = 35.dp.toPx()
+                    // Donut background
+                    drawCircle(color = Color.White.copy(0.05f), radius = size.minDimension / 2, style = Stroke(strokeWidth))
+                    // Slices
+                    drawArc(Color(0xFF4D86FF), -90f, sweepI, false, style = Stroke(strokeWidth))
+                    drawArc(Color(0xFFE91E63), -90f + sweepI, 360f - sweepI, false, style = Stroke(strokeWidth))
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Gastos vs", color = Color.White.copy(0.6f), fontSize = 12.sp)
+                    Text("Ingresos", color = Color.White.copy(0.6f), fontSize = 12.sp)
                 }
             } else {
-                Text("Sin datos", color = Color.White.copy(0.6f))
+                Text("Sin movimientos", color = Color.White.copy(0.4f))
             }
         }
 
@@ -669,13 +781,30 @@ fun ResumenView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>, s
             FilterButton("Mes", filtro == "Mes") { filtro = "Mes" }
         }
 
-        Spacer(modifier = Modifier.height(25.dp))
-        Text("Gastos por Categoria ($filtro)", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(30.dp))
+        Text(
+            "Gastos por Categoria",
+            color = Color.White,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Start).padding(start = 5.dp)
+        )
+        Text(
+            "Periodo seleccionado: $filtro",
+            color = Color.Cyan.copy(0.7f),
+            fontSize = 14.sp,
+            modifier = Modifier.align(Alignment.Start).padding(start = 5.dp, bottom = 12.dp)
+        )
 
         val gastosAgrupados = gastosF.groupBy { it.concepto }
         if (gastosAgrupados.isEmpty()) {
-            Text("No hay gastos en este periodo", color = Color.White.copy(0.5f), modifier = Modifier.padding(top = 10.dp))
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(Icons.Rounded.Inbox, contentDescription = null, tint = Color.White.copy(0.2f), modifier = Modifier.size(64.dp))
+                Text("No hay registros en este periodo", color = Color.White.copy(0.4f), fontSize = 14.sp)
+            }
         } else {
             gastosAgrupados.forEach { (categoria, lista) ->
                 val suma = lista.sumOf { it.cantidad }
@@ -683,16 +812,26 @@ fun ResumenView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>, s
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 6.dp)
-                        .background(Color.White.copy(0.05f), RoundedCornerShape(10.dp))
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .background(Color.White.copy(0.06f), RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(categoria, color = Color.White.copy(0.9f))
-                    Text("\$${String.format("%.2f", suma)}", color = Color.White, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier.size(40.dp).background(Color.White.copy(0.1f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(getIconForCategory(categoria, false), contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(categoria, color = Color.White.copy(0.9f), fontWeight = FontWeight.Medium)
+                    }
+                    Text("\$${String.format("%.2f", suma)}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         }
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(40.dp))
     }
 }
 
@@ -765,28 +904,47 @@ fun TransaccionesView(
             items(listaFiltrada.reversed()) { item ->
                 val cantidadMostrada = if (esIngreso) item.cantidad else -item.cantidad
 
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .clickable(enabled = !soloLectura) { itemAEditar = item },
-                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.1f)),
-                    shape = RoundedCornerShape(12.dp)
+                AnimatedVisibility(
+                    visible = true,
+                    enter = fadeIn() + slideInVertically(initialOffsetY = { 40 })
                 ) {
-                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(item.concepto, color = Color.White, fontWeight = FontWeight.Bold)
-                            Text(sdf.format(item.fecha), color = Color.White.copy(0.6f), fontSize = 12.sp)
-                        }
-                        Text(
-                            "\$${String.format("%.2f", cantidadMostrada)}",
-                            color = if (cantidadMostrada > 0) Color.Green else Color.Red,
-                            fontWeight = FontWeight.Bold
-                        )
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                            .clickable(enabled = !soloLectura) { itemAEditar = item },
+                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.08f)),
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier.size(44.dp).background(Color.White.copy(0.1f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    getIconForCategory(item.concepto, esIngreso),
+                                    contentDescription = null,
+                                    tint = if (esIngreso) Color(0xFF4CAF50) else Color(0xFFFF5252),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(item.concepto, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text(sdf.format(item.fecha), color = Color.White.copy(0.5f), fontSize = 12.sp)
+                            }
+                            Text(
+                                "\$${String.format("%.2f", cantidadMostrada)}",
+                                color = if (cantidadMostrada > 0) Color(0xFF4CAF50) else Color(0xFFFF5252),
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 16.sp
+                            )
 
-                        if (!soloLectura) {
-                            IconButton(onClick = { itemAEliminar = item }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(0.7f))
+                            if (!soloLectura) {
+                                IconButton(onClick = { itemAEliminar = item }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(0.5f), modifier = Modifier.size(20.dp))
+                                }
                             }
                         }
                     }
