@@ -836,6 +836,61 @@ fun ResumenView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>, s
 }
 
 @Composable
+fun GraficaBarrasDinero(transacciones: List<Transaccion>, colorBarra: Color) {
+    val agrupados = transacciones.groupBy { it.concepto }
+        .mapValues { it.value.sumOf { t -> t.cantidad } }
+
+    val maxMonto = agrupados.values.maxOrNull() ?: 1.0
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(140.dp)
+            .padding(vertical = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.05f)),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            agrupados.forEach { (cat, monto) ->
+                val porcentaje = (monto / maxMonto).coerceIn(0.1, 1.0).toFloat()
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "$${String.format("%.0f", monto)}",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight(porcentaje * 0.7f)
+                            .width(24.dp)
+                            .background(colorBarra, RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = cat.take(5),
+                        color = Color.White.copy(0.6f),
+                        fontSize = 9.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun TransaccionesView(
     esIngreso: Boolean,
     ingresos: List<Ingreso>,
@@ -850,7 +905,6 @@ fun TransaccionesView(
     var itemAEditar by remember { mutableStateOf<Transaccion?>(null) }
     var itemAEliminar by remember { mutableStateOf<Transaccion?>(null) }
     var busqueda by remember { mutableStateOf("") }
-    var filtroFecha by remember { mutableStateOf("Todos") }
     var filtroCat by remember { mutableStateOf("Todas") }
     var mensajeDialogo by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -860,7 +914,6 @@ fun TransaccionesView(
     val categoriasDisponibles = listOf("Todas") + (if (esIngreso) LISTA_CATEGORIAS_INGRESOS else LISTA_CATEGORIAS_GASTOS)
     val listaFiltrada = listaOriginal.filter {
         (busqueda.isEmpty() || it.concepto.contains(busqueda, ignoreCase = true)) &&
-            (filtroFecha == "Todos" || filtrarPorTiempo(it.fecha, filtroFecha)) &&
             (filtroCat == "Todas" || it.concepto == filtroCat)
     }
     val total = listaFiltrada.sumOf { it.cantidad }
@@ -887,17 +940,17 @@ fun TransaccionesView(
             colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
         )
 
-        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            FilterButton("Todos", filtroFecha == "Todos") { filtroFecha = "Todos" }
-            FilterButton("Dia", filtroFecha == "Dia") { filtroFecha = "Dia" }
-            FilterButton("Semana", filtroFecha == "Semana") { filtroFecha = "Semana" }
-            FilterButton("Mes", filtroFecha == "Mes") { filtroFecha = "Mes" }
-        }
-
         LazyRow(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
             items(categoriasDisponibles) { cat ->
                 FilterButton(cat, filtroCat == cat) { filtroCat = cat }
             }
+        }
+
+        if (listaFiltrada.isNotEmpty()) {
+            GraficaBarrasDinero(
+                transacciones = listaFiltrada,
+                colorBarra = if (esIngreso) Color(0xFF4CAF50) else Color(0xFFFF5252)
+            )
         }
 
         LazyColumn(modifier = Modifier.weight(1f)) {
