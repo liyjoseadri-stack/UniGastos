@@ -158,7 +158,7 @@ fun LoginScreen(navController: NavHostController, db: SQLiteManager, firestore: 
                 tint = Color.White
             )
             Text(
-                "Unigastos",
+                "UniGastos",
                 fontSize = 42.sp,
                 fontWeight = FontWeight.ExtraBold,
                 style = androidx.compose.ui.text.TextStyle(
