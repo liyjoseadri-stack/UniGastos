@@ -5,16 +5,28 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.util.Date
+import java.util.UUID
 
 interface Transaccion {
-    val id: Int
+    val id: String
     val fecha: Date
     val concepto: String
     val cantidad: Double
 }
 
-data class Gasto(override val id: Int, override val fecha: Date, override val concepto: String, override val cantidad: Double) : Transaccion
-data class Ingreso(override val id: Int, override val fecha: Date, override val concepto: String, override val cantidad: Double) : Transaccion
+data class Gasto(
+    override val id: String,
+    override val fecha: Date,
+    override val concepto: String,
+    override val cantidad: Double
+) : Transaccion
+
+data class Ingreso(
+    override val id: String,
+    override val fecha: Date,
+    override val concepto: String,
+    override val cantidad: Double
+) : Transaccion
 
 data class UsuarioInfo(val nombre: String, val rol: String, val vinculadoA: String)
 
@@ -22,7 +34,7 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
 
     companion object {
         private const val DATABASE_NAME = "unigastos.db"
-        private const val DATABASE_VERSION = 5
+        private const val DATABASE_VERSION = 6
         private var instance: SQLiteManager? = null
 
         fun getInstance(context: Context): SQLiteManager {
@@ -35,29 +47,84 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE usuarios (nombre TEXT PRIMARY KEY, password TEXT, activo INTEGER DEFAULT 0, rol TEXT DEFAULT 'USUARIO', vinculado_a TEXT)")
-        db.execSQL("CREATE TABLE gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
-        db.execSQL("CREATE TABLE ingresos (id INTEGER PRIMARY KEY AUTOINCREMENT, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
+        db.execSQL("CREATE TABLE gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, remote_id TEXT UNIQUE, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
+        db.execSQL("CREATE TABLE ingresos (id INTEGER PRIMARY KEY AUTOINCREMENT, remote_id TEXT UNIQUE, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
-            try { db.execSQL("ALTER TABLE ingresos ADD COLUMN concepto TEXT DEFAULT 'Ingreso'") } catch (e: Exception) {}
+            try { db.execSQL("ALTER TABLE ingresos ADD COLUMN concepto TEXT DEFAULT 'Ingreso'") } catch (_: Exception) {}
         }
         if (oldVersion < 3) {
-            try { db.execSQL("ALTER TABLE gastos ADD COLUMN concepto TEXT DEFAULT 'Gasto'") } catch (e: Exception) {}
+            try { db.execSQL("ALTER TABLE gastos ADD COLUMN concepto TEXT DEFAULT 'Gasto'") } catch (_: Exception) {}
         }
         if (oldVersion < 4) {
-            try { db.execSQL("ALTER TABLE usuarios ADD COLUMN password TEXT DEFAULT ''") } catch (e: Exception) {}
+            try { db.execSQL("ALTER TABLE usuarios ADD COLUMN password TEXT DEFAULT ''") } catch (_: Exception) {}
         }
         if (oldVersion < 5) {
-            try {
-                db.execSQL("ALTER TABLE usuarios ADD COLUMN rol TEXT DEFAULT 'USUARIO'")
-                db.execSQL("ALTER TABLE usuarios ADD COLUMN vinculado_a TEXT")
-            } catch (e: Exception) {}
+            try { db.execSQL("ALTER TABLE usuarios ADD COLUMN rol TEXT DEFAULT 'USUARIO'") } catch (_: Exception) {}
+            try { db.execSQL("ALTER TABLE usuarios ADD COLUMN vinculado_a TEXT") } catch (_: Exception) {}
+        }
+        if (oldVersion < 6) {
+            try { db.execSQL("ALTER TABLE gastos ADD COLUMN remote_id TEXT") } catch (_: Exception) {}
+            try { db.execSQL("ALTER TABLE ingresos ADD COLUMN remote_id TEXT") } catch (_: Exception) {}
+            db.execSQL("UPDATE gastos SET remote_id = 'local-gasto-' || id WHERE remote_id IS NULL OR remote_id = ''")
+            db.execSQL("UPDATE ingresos SET remote_id = 'local-ingreso-' || id WHERE remote_id IS NULL OR remote_id = ''")
         }
     }
 
-    // --- Gestión de Usuarios ---
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        asegurarColumnas(db)
+    }
+
+    private fun asegurarColumnas(db: SQLiteDatabase) {
+        if (tablaExiste(db, "usuarios")) {
+            agregarColumnaSiFalta(db, "usuarios", "password", "TEXT DEFAULT ''")
+            agregarColumnaSiFalta(db, "usuarios", "activo", "INTEGER DEFAULT 0")
+            agregarColumnaSiFalta(db, "usuarios", "rol", "TEXT DEFAULT 'USUARIO'")
+            agregarColumnaSiFalta(db, "usuarios", "vinculado_a", "TEXT")
+            db.execSQL("UPDATE usuarios SET vinculado_a = nombre WHERE vinculado_a IS NULL OR vinculado_a = ''")
+        }
+        if (tablaExiste(db, "gastos")) {
+            agregarColumnaSiFalta(db, "gastos", "remote_id", "TEXT")
+            agregarColumnaSiFalta(db, "gastos", "concepto", "TEXT DEFAULT 'Gasto'")
+            agregarColumnaSiFalta(db, "gastos", "usuario_nombre", "TEXT")
+            db.execSQL("UPDATE gastos SET remote_id = 'local-gasto-' || id WHERE remote_id IS NULL OR remote_id = ''")
+        }
+        if (tablaExiste(db, "ingresos")) {
+            agregarColumnaSiFalta(db, "ingresos", "remote_id", "TEXT")
+            agregarColumnaSiFalta(db, "ingresos", "concepto", "TEXT DEFAULT 'Ingreso'")
+            agregarColumnaSiFalta(db, "ingresos", "usuario_nombre", "TEXT")
+            db.execSQL("UPDATE ingresos SET remote_id = 'local-ingreso-' || id WHERE remote_id IS NULL OR remote_id = ''")
+        }
+    }
+
+    private fun tablaExiste(db: SQLiteDatabase, tabla: String): Boolean {
+        val cursor = db.rawQuery(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+            arrayOf(tabla)
+        )
+        val existe = cursor.moveToFirst()
+        cursor.close()
+        return existe
+    }
+
+    private fun agregarColumnaSiFalta(db: SQLiteDatabase, tabla: String, columna: String, definicion: String) {
+        val cursor = db.rawQuery("PRAGMA table_info($tabla)", null)
+        var existe = false
+        while (cursor.moveToNext()) {
+            if (cursor.getString(cursor.getColumnIndexOrThrow("name")) == columna) {
+                existe = true
+                break
+            }
+        }
+        cursor.close()
+        if (!existe) {
+            db.execSQL("ALTER TABLE $tabla ADD COLUMN $columna $definicion")
+        }
+    }
+
     fun iniciarSesion(nombre: String) {
         val db = writableDatabase
         db.execSQL("UPDATE usuarios SET activo = 0")
@@ -65,15 +132,12 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
     }
 
     fun cerrarSesion() {
-        val db = writableDatabase
-        db.execSQL("UPDATE usuarios SET activo = 0")
+        writableDatabase.execSQL("UPDATE usuarios SET activo = 0")
     }
 
     fun obtenerUsuarioActivo(): String {
-        val db = readableDatabase
-        val cursor = db.rawQuery("SELECT nombre FROM usuarios WHERE activo = 1", null)
-        var nombre = ""
-        if (cursor.moveToFirst()) { nombre = cursor.getString(0) }
+        val cursor = readableDatabase.rawQuery("SELECT nombre FROM usuarios WHERE activo = 1", null)
+        val nombre = if (cursor.moveToFirst()) cursor.getString(0) else ""
         cursor.close()
         return nombre
     }
@@ -81,24 +145,11 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
     fun obtenerUsuarioActivoInfo(): UsuarioInfo? {
         val nombreActivo = obtenerUsuarioActivo()
         if (nombreActivo.isEmpty()) return null
-        
-        val db = readableDatabase
-        val cursor = db.rawQuery("SELECT nombre, rol, vinculado_a FROM usuarios WHERE nombre = ?", arrayOf(nombreActivo))
-        var info: UsuarioInfo? = null
-        if (cursor.moveToFirst()) {
-            info = UsuarioInfo(
-                cursor.getString(0),
-                cursor.getString(1) ?: "USUARIO",
-                cursor.getString(2) ?: cursor.getString(0)
-            )
-        }
-        cursor.close()
-        return info
+        return obtenerInfoUsuario(nombreActivo)
     }
 
     fun usuarioExiste(nombre: String): Boolean {
-        val db = readableDatabase
-        val cursor = db.rawQuery("SELECT 1 FROM usuarios WHERE nombre = ? LIMIT 1", arrayOf(nombre))
+        val cursor = readableDatabase.rawQuery("SELECT 1 FROM usuarios WHERE nombre = ? LIMIT 1", arrayOf(nombre))
         val existe = cursor.moveToFirst()
         cursor.close()
         return existe
@@ -106,131 +157,200 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
 
     fun registrarUsuario(nombre: String, password: String, rol: String = "USUARIO", vinculadoA: String? = null): Boolean {
         if (nombre.isBlank() || password.isBlank() || usuarioExiste(nombre)) return false
+        guardarUsuario(nombre, password, rol, vinculadoA ?: nombre)
+        return true
+    }
+
+    fun guardarUsuario(nombre: String, password: String, rol: String, vinculadoA: String) {
         val values = ContentValues().apply {
             put("nombre", nombre)
             put("password", password)
             put("rol", rol)
-            put("vinculado_a", vinculadoA ?: nombre)
+            put("vinculado_a", vinculadoA)
         }
-        return writableDatabase.insert("usuarios", null, values) != -1L
+        writableDatabase.insertWithOnConflict("usuarios", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
     fun validarCredenciales(nombre: String, password: String): Boolean {
-        val cursor = readableDatabase.rawQuery("SELECT 1 FROM usuarios WHERE nombre = ? AND password = ? LIMIT 1", arrayOf(nombre, password))
+        val cursor = readableDatabase.rawQuery(
+            "SELECT 1 FROM usuarios WHERE nombre = ? AND password = ? LIMIT 1",
+            arrayOf(nombre, password)
+        )
         val valido = cursor.moveToFirst()
         cursor.close()
         return valido
     }
 
-    fun obtenerInfoUsuario(nombre: String, password: String): UsuarioInfo? {
-        val cursor = readableDatabase.rawQuery("SELECT nombre, rol, vinculado_a FROM usuarios WHERE nombre = ? AND password = ?", arrayOf(nombre, password))
-        var info: UsuarioInfo? = null
-        if (cursor.moveToFirst()) {
-            info = UsuarioInfo(
+    fun obtenerInfoUsuario(nombre: String, password: String? = null): UsuarioInfo? {
+        val args = if (password == null) arrayOf(nombre) else arrayOf(nombre, password)
+        val where = if (password == null) "nombre = ?" else "nombre = ? AND password = ?"
+        val cursor = readableDatabase.rawQuery("SELECT nombre, rol, vinculado_a FROM usuarios WHERE $where", args)
+        val info = if (cursor.moveToFirst()) {
+            UsuarioInfo(
                 cursor.getString(0),
                 cursor.getString(1) ?: "USUARIO",
                 cursor.getString(2) ?: cursor.getString(0)
             )
+        } else {
+            null
         }
         cursor.close()
         return info
     }
 
-    // --- Gestión de Gastos ---
-    fun insertarGasto(concepto: String, cantidad: Double, fecha: Date) {
-        val info = obtenerUsuarioActivoInfo() ?: return
-        if (info.rol == "TUTOR") return // El tutor no debe poder insertar datos
+    fun usuarioDatosActual(): String {
+        return obtenerUsuarioActivoInfo()?.vinculadoA ?: ""
+    }
 
+    fun insertarGasto(concepto: String, cantidad: Double, fecha: Date): String {
+        val info = obtenerUsuarioActivoInfo() ?: return ""
+        if (info.rol == "TUTOR") return ""
+        val remoteId = UUID.randomUUID().toString()
         val values = ContentValues().apply {
+            put("remote_id", remoteId)
             put("concepto", concepto)
             put("cantidad", cantidad)
             put("fecha", fecha.time)
             put("usuario_nombre", info.nombre)
         }
         writableDatabase.insert("gastos", null, values)
+        return remoteId
     }
 
     fun obtenerGastos(): List<Gasto> {
         val info = obtenerUsuarioActivoInfo() ?: return emptyList()
-        // El tutor ve los gastos del usuario vinculado
-        val cursor = readableDatabase.rawQuery("SELECT * FROM gastos WHERE usuario_nombre = ?", arrayOf(info.vinculadoA))
+        return obtenerGastosDeUsuario(info.vinculadoA)
+    }
+
+    fun obtenerGastosDeUsuario(usuarioNombre: String): List<Gasto> {
+        val cursor = readableDatabase.rawQuery("SELECT * FROM gastos WHERE usuario_nombre = ?", arrayOf(usuarioNombre))
         val lista = mutableListOf<Gasto>()
         while (cursor.moveToNext()) {
-            lista.add(Gasto(
-                cursor.getInt(cursor.getColumnIndexOrThrow("id")),
-                Date(cursor.getLong(cursor.getColumnIndexOrThrow("fecha"))),
-                cursor.getString(cursor.getColumnIndexOrThrow("concepto")) ?: "Gasto",
-                cursor.getDouble(cursor.getColumnIndexOrThrow("cantidad"))
-            ))
+            lista.add(
+                Gasto(
+                    cursor.getString(cursor.getColumnIndexOrThrow("remote_id"))
+                        ?: cursor.getInt(cursor.getColumnIndexOrThrow("id")).toString(),
+                    Date(cursor.getLong(cursor.getColumnIndexOrThrow("fecha"))),
+                    cursor.getString(cursor.getColumnIndexOrThrow("concepto")) ?: "Gasto",
+                    cursor.getDouble(cursor.getColumnIndexOrThrow("cantidad"))
+                )
+            )
         }
         cursor.close()
         return lista
     }
 
-    fun actualizarGasto(id: Int, concepto: String, cantidad: Double, fecha: Date) {
+    fun actualizarGasto(id: String, concepto: String, cantidad: Double, fecha: Date) {
         val info = obtenerUsuarioActivoInfo() ?: return
         if (info.rol == "TUTOR") return
-        
         val values = ContentValues().apply {
             put("concepto", concepto)
             put("cantidad", cantidad)
             put("fecha", fecha.time)
         }
-        writableDatabase.update("gastos", values, "id = ?", arrayOf(id.toString()))
+        writableDatabase.update("gastos", values, "remote_id = ? OR id = ?", arrayOf(id, id))
     }
 
-    fun eliminarGasto(id: Int) {
+    fun eliminarGasto(id: String) {
         val info = obtenerUsuarioActivoInfo() ?: return
         if (info.rol == "TUTOR") return
-        writableDatabase.delete("gastos", "id = ?", arrayOf(id.toString()))
+        writableDatabase.delete("gastos", "remote_id = ? OR id = ?", arrayOf(id, id))
     }
 
-    // --- Gestión de Ingresos ---
-    fun insertarIngreso(concepto: String, cantidad: Double, fecha: Date) {
-        val info = obtenerUsuarioActivoInfo() ?: return
-        if (info.rol == "TUTOR") return
-
+    fun insertarIngreso(concepto: String, cantidad: Double, fecha: Date): String {
+        val info = obtenerUsuarioActivoInfo() ?: return ""
+        if (info.rol == "TUTOR") return ""
+        val remoteId = UUID.randomUUID().toString()
         val values = ContentValues().apply {
+            put("remote_id", remoteId)
             put("concepto", concepto)
             put("cantidad", cantidad)
             put("fecha", fecha.time)
             put("usuario_nombre", info.nombre)
         }
         writableDatabase.insert("ingresos", null, values)
+        return remoteId
     }
 
     fun obtenerIngresos(): List<Ingreso> {
         val info = obtenerUsuarioActivoInfo() ?: return emptyList()
-        // El tutor ve los ingresos del usuario vinculado
-        val cursor = readableDatabase.rawQuery("SELECT * FROM ingresos WHERE usuario_nombre = ?", arrayOf(info.vinculadoA))
+        return obtenerIngresosDeUsuario(info.vinculadoA)
+    }
+
+    fun obtenerIngresosDeUsuario(usuarioNombre: String): List<Ingreso> {
+        val cursor = readableDatabase.rawQuery("SELECT * FROM ingresos WHERE usuario_nombre = ?", arrayOf(usuarioNombre))
         val lista = mutableListOf<Ingreso>()
         while (cursor.moveToNext()) {
-            lista.add(Ingreso(
-                cursor.getInt(cursor.getColumnIndexOrThrow("id")),
-                Date(cursor.getLong(cursor.getColumnIndexOrThrow("fecha"))),
-                cursor.getString(cursor.getColumnIndexOrThrow("concepto")) ?: "Ingreso",
-                cursor.getDouble(cursor.getColumnIndexOrThrow("cantidad"))
-            ))
+            lista.add(
+                Ingreso(
+                    cursor.getString(cursor.getColumnIndexOrThrow("remote_id"))
+                        ?: cursor.getInt(cursor.getColumnIndexOrThrow("id")).toString(),
+                    Date(cursor.getLong(cursor.getColumnIndexOrThrow("fecha"))),
+                    cursor.getString(cursor.getColumnIndexOrThrow("concepto")) ?: "Ingreso",
+                    cursor.getDouble(cursor.getColumnIndexOrThrow("cantidad"))
+                )
+            )
         }
         cursor.close()
         return lista
     }
 
-    fun actualizarIngreso(id: Int, concepto: String, cantidad: Double, fecha: Date) {
+    fun actualizarIngreso(id: String, concepto: String, cantidad: Double, fecha: Date) {
         val info = obtenerUsuarioActivoInfo() ?: return
         if (info.rol == "TUTOR") return
-
         val values = ContentValues().apply {
             put("concepto", concepto)
             put("cantidad", cantidad)
             put("fecha", fecha.time)
         }
-        writableDatabase.update("ingresos", values, "id = ?", arrayOf(id.toString()))
+        writableDatabase.update("ingresos", values, "remote_id = ? OR id = ?", arrayOf(id, id))
     }
 
-    fun eliminarIngreso(id: Int) {
+    fun eliminarIngreso(id: String) {
         val info = obtenerUsuarioActivoInfo() ?: return
         if (info.rol == "TUTOR") return
-        writableDatabase.delete("ingresos", "id = ?", arrayOf(id.toString()))
+        writableDatabase.delete("ingresos", "remote_id = ? OR id = ?", arrayOf(id, id))
+    }
+
+    fun guardarIngresosDesdeServidor(usuarioNombre: String, ingresos: List<Ingreso>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("ingresos", "usuario_nombre = ?", arrayOf(usuarioNombre))
+            ingresos.forEach { ingreso ->
+                val values = ContentValues().apply {
+                    put("remote_id", ingreso.id)
+                    put("concepto", ingreso.concepto)
+                    put("cantidad", ingreso.cantidad)
+                    put("fecha", ingreso.fecha.time)
+                    put("usuario_nombre", usuarioNombre)
+                }
+                db.insertWithOnConflict("ingresos", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun guardarGastosDesdeServidor(usuarioNombre: String, gastos: List<Gasto>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("gastos", "usuario_nombre = ?", arrayOf(usuarioNombre))
+            gastos.forEach { gasto ->
+                val values = ContentValues().apply {
+                    put("remote_id", gasto.id)
+                    put("concepto", gasto.concepto)
+                    put("cantidad", gasto.cantidad)
+                    put("fecha", gasto.fecha.time)
+                    put("usuario_nombre", usuarioNombre)
+                }
+                db.insertWithOnConflict("gastos", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 }
