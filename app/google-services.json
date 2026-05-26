@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "362366377176",
+    "project_id": "unigastos-b2485",
+    "storage_bucket": "unigastos-b2485.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:362366377176:android:6895d90e3ceb97e0ff4bad",
+        "android_client_info": {
+          "package_name": "com.example.unigastos"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAf7yyXw1HP3LIYm33QzdIApQUkInHBVss"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
