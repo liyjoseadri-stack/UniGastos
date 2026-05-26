@@ -11,9 +11,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -66,6 +69,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+// --- CATEGORÍAS FIJAS ---
+val LISTA_CATEGORIAS_GASTOS = listOf("Comida", "Transporte", "Renta", "Material escolar", "Servicios", "Salud", "Entretenimiento", "Otros")
+val LISTA_CATEGORIAS_INGRESOS = listOf("Sueldo", "Beca", "Apoyo", "Otros")
 
 // --- COLORES ---
 val FondoInicio = Color(0xFF1C133F)
@@ -409,7 +416,7 @@ fun HomeScreen(nombre: String, navController: NavHostController, db: SQLiteManag
         }
 
         when (vistaActiva) {
-            "Resumen" -> ResumenView(ingresos, gastos)
+            "Resumen" -> ResumenView(nombre, ingresos, gastos)
             "Ingresos" -> TransaccionesView(true, ingresos, emptyList(), db, soloLectura) { ingresos = db.obtenerIngresos() }
             "Gastos" -> TransaccionesView(false, emptyList(), gastos, db, soloLectura) { gastos = db.obtenerGastos() }
         }
@@ -428,15 +435,30 @@ fun RowScope.TabItem(text: String, activo: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun ResumenView(ingresos: List<Ingreso>, gastos: List<Gasto>) {
+fun ResumenView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>) {
     var filtro by remember { mutableStateOf("Mes") }
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("UniGastosPrefs", android.content.Context.MODE_PRIVATE) }
+    val budgetKey = "presupuesto_$usuario"
+    
+    var presupuestoInput by remember { mutableStateOf(prefs.getString(budgetKey, "") ?: "") }
+    val presupuesto = presupuestoInput.toDoubleOrNull() ?: 0.0
+
     val ingresosF = ingresos.filter { filtrarPorTiempo(it.fecha, filtro) }
     val gastosF = gastos.filter { filtrarPorTiempo(it.fecha, filtro) }
     val totalI = ingresosF.sumOf { it.cantidad }
     val totalG = gastosF.sumOf { it.cantidad }
     val balance = totalI - totalG
 
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    val scrollState = rememberScrollState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(20.dp)
+            .verticalScroll(scrollState),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Card(
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1F1254)),
             shape = RoundedCornerShape(35.dp)
@@ -449,15 +471,80 @@ fun ResumenView(ingresos: List<Ingreso>, gastos: List<Gasto>) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // Presupuesto UI
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.1f)),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Column(modifier = Modifier.padding(15.dp)) {
+                Text("Presupuesto Mensual", color = Color.Cyan, fontWeight = FontWeight.Bold)
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White.copy(0.6f), modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextField(
+                        value = presupuestoInput,
+                        onValueChange = { 
+                            if (it.isEmpty() || it.matches(Regex("^\\d*\\.?\\d*$"))) {
+                                presupuestoInput = it
+                                prefs.edit().putString(budgetKey, it).apply()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Definir presupuesto", color = Color.Gray, fontSize = 14.sp) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        )
+                    )
+                }
+                
+                if (presupuesto > 0) {
+                    val progreso = (totalG / presupuesto).coerceIn(0.0, 1.0)
+                    LinearProgressIndicator(
+                        progress = { progreso.toFloat() },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        color = if (totalG > presupuesto) Color.Red else Color.Green,
+                        trackColor = Color.White.copy(0.2f)
+                    )
+                    
+                    if (totalG > presupuesto) {
+                        Surface(
+                            color = Color.Red.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "¡ATENCIÓN! Has excedido tu presupuesto por $${String.format("%.2f", totalG - presupuesto)}",
+                                color = Color(0xFFFFCDD2),
+                                modifier = Modifier.padding(8.dp),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    } else {
+                        Text("Disponible: $${String.format("%.2f", presupuesto - totalG)}", color = Color.White.copy(0.7f), fontSize = 12.sp)
+                    }
+                } else {
+                    Text("Presupuesto no configurado", color = Color.White.copy(0.5f), fontSize = 12.sp)
+                }
+            }
+        }
+
         // Gráfico de Sectores Simple
         Box(modifier = Modifier
             .fillMaxWidth()
-            .height(250.dp)
+            .height(200.dp)
             .background(Brush.verticalGradient(listOf(Color(0xFF34396E), Color(0xFF526580))), RoundedCornerShape(35.dp)),
             contentAlignment = Alignment.Center
         ) {
             if (totalI + totalG > 0) {
-                Canvas(modifier = Modifier.size(180.dp)) {
+                Canvas(modifier = Modifier.size(150.dp)) {
                     val sweepI = (totalI / (totalI + totalG) * 360).toFloat()
                     drawArc(Color.Blue, -90f, sweepI, true)
                     drawArc(Color.Magenta, -90f + sweepI, 360f - sweepI, true)
@@ -472,6 +559,32 @@ fun ResumenView(ingresos: List<Ingreso>, gastos: List<Gasto>) {
             FilterButton("Semana", filtro == "Semana") { filtro = "Semana" }
             FilterButton("Mes", filtro == "Mes") { filtro = "Mes" }
         }
+
+        // Desglose por Categoría
+        Spacer(modifier = Modifier.height(25.dp))
+        Text("Gastos por Categoría ($filtro)", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
+        Spacer(modifier = Modifier.height(10.dp))
+        
+        val gastosAgrupados = gastosF.groupBy { it.concepto }
+        if (gastosAgrupados.isEmpty()) {
+            Text("No hay gastos en este periodo", color = Color.White.copy(0.5f), modifier = Modifier.padding(top = 10.dp))
+        } else {
+            gastosAgrupados.forEach { (categoria, lista) ->
+                val suma = lista.sumOf { it.cantidad }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp)
+                        .background(Color.White.copy(0.05f), RoundedCornerShape(10.dp))
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(categoria, color = Color.White.copy(0.9f))
+                    Text("$${String.format("%.2f", suma)}", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(20.dp))
     }
 }
 
@@ -482,13 +595,17 @@ fun TransaccionesView(esIngreso: Boolean, ingresos: List<Ingreso>, gastos: List<
     var itemAEliminar by remember { mutableStateOf<Transaccion?>(null) }
     var busqueda by remember { mutableStateOf("") }
     var filtroFecha by remember { mutableStateOf("Todos") }
+    var filtroCat by remember { mutableStateOf("Todas") }
 
     val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
     val listaOriginal: List<Transaccion> = if (esIngreso) ingresos else gastos
+    val categoriasDisponibles = listOf("Todas") + (if (esIngreso) LISTA_CATEGORIAS_INGRESOS else LISTA_CATEGORIAS_GASTOS)
+
     val listaFiltrada = listaOriginal.filter { 
         (busqueda.isEmpty() || it.concepto.contains(busqueda, ignoreCase = true)) &&
-        (filtroFecha == "Todos" || filtrarPorTiempo(it.fecha, filtroFecha))
+        (filtroFecha == "Todos" || filtrarPorTiempo(it.fecha, filtroFecha)) &&
+        (filtroCat == "Todas" || it.concepto == filtroCat)
     }
 
     val total = listaFiltrada.sumOf { it.cantidad }
@@ -502,18 +619,25 @@ fun TransaccionesView(esIngreso: Boolean, ingresos: List<Ingreso>, gastos: List<
             value = busqueda,
             onValueChange = { busqueda = it },
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            placeholder = { Text("Buscar por concepto...") },
+            placeholder = { Text("Buscar...") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             shape = RoundedCornerShape(12.dp),
             colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
         )
 
         // Filtro de fecha
-        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
             FilterButton("Todos", filtroFecha == "Todos") { filtroFecha = "Todos" }
             FilterButton("Día", filtroFecha == "Día") { filtroFecha = "Día" }
             FilterButton("Semana", filtroFecha == "Semana") { filtroFecha = "Semana" }
             FilterButton("Mes", filtroFecha == "Mes") { filtroFecha = "Mes" }
+        }
+
+        // Filtro de categoría
+        LazyRow(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+            items(categoriasDisponibles) { cat ->
+                FilterButton(cat, filtroCat == cat) { filtroCat = cat }
+            }
         }
 
         LazyColumn(modifier = Modifier.weight(1f)) {
@@ -628,6 +752,9 @@ fun FormularioDialog(
     val context = LocalContext.current
     val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
+    var expanded by remember { mutableStateOf(false) }
+    val categorias = if (esIngreso) LISTA_CATEGORIAS_INGRESOS else LISTA_CATEGORIAS_GASTOS
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(20.dp), color = TarjetaInicio) {
             Column(modifier = Modifier.padding(20.dp)) {
@@ -640,13 +767,43 @@ fun FormularioDialog(
                 )
                 Spacer(modifier = Modifier.height(15.dp))
                 
-                TextField(
-                    value = concepto, 
-                    onValueChange = { concepto = it }, 
-                    label = { Text("Concepto") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                // Selector de Categoría (usando campo concepto)
+                Box {
+                    OutlinedTextField(
+                        value = concepto,
+                        onValueChange = { },
+                        readOnly = true,
+                        label = { Text("Categoría", color = Color.Cyan) },
+                        modifier = Modifier.fillMaxWidth().clickable { expanded = true },
+                        trailingIcon = {
+                            IconButton(onClick = { expanded = true }) {
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color.Cyan)
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color.Cyan,
+                            unfocusedBorderColor = Color.White.copy(0.5f)
+                        )
+                    )
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.fillMaxWidth(0.7f).background(TarjetaFin)
+                    ) {
+                        categorias.forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(cat, color = Color.White) },
+                                onClick = {
+                                    concepto = cat
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(10.dp))
                 
                 TextField(
