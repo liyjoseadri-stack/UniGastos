@@ -561,6 +561,9 @@ fun HomeScreen(nombre: String, navController: NavHostController, db: SQLiteManag
             TabItem("Ingresos", vistaActiva == "Ingresos") { vistaActiva = "Ingresos" }
             TabItem("Resumen", vistaActiva == "Resumen") { vistaActiva = "Resumen" }
             TabItem("Gastos", vistaActiva == "Gastos") { vistaActiva = "Gastos" }
+            if (soloLectura) {
+                TabItem("Reportes", vistaActiva == "Reportes") { vistaActiva = "Reportes" }
+            }
         }
 
         AnimatedContent(
@@ -581,6 +584,7 @@ fun HomeScreen(nombre: String, navController: NavHostController, db: SQLiteManag
                 "Gastos" -> TransaccionesView(false, emptyList(), gastos, db, firestore, usuarioDatos, soloLectura) {
                     gastos = db.obtenerGastosDeUsuario(usuarioDatos)
                 }
+                "Reportes" -> ReportesTutorView(usuarioDatos, ingresos, gastos)
             }
         }
     }
@@ -948,6 +952,108 @@ fun GraficaBarrasDinero(transacciones: List<Transaccion>, colorBarra: Color) {
 }
 
 @Composable
+fun ReportesTutorView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>) {
+    val context = LocalContext.current
+    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+    var fechaInicio by remember { mutableStateOf(Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }.time) }
+    var fechaFin by remember { mutableStateOf(Date()) }
+
+    val gastosReporte = gastos.filter { it.fecha in fechaInicio..fechaFin }
+    val ingresosReporte = ingresos.filter { it.fecha in fechaInicio..fechaFin }
+    val totalGastos = gastosReporte.sumOf { it.cantidad }
+    val totalIngresos = ingresosReporte.sumOf { it.cantidad }
+    val pendientes = gastosReporte.count { it.estado == "PENDIENTE" }
+    val rechazados = gastosReporte.count { it.estado == "RECHAZADO" }
+    val porCategoria = gastosReporte.groupBy { it.concepto }.mapValues { it.value.sumOf { gasto -> gasto.cantidad } }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(18.dp).verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("Reportes de $usuario", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    val cal = Calendar.getInstance().apply { time = fechaInicio }
+                    DatePickerDialog(context, { _, y, m, d ->
+                        fechaInicio = Calendar.getInstance().apply {
+                            set(y, m, d, 0, 0, 0)
+                        }.time
+                    }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+                },
+                modifier = Modifier.weight(1f)
+            ) { Text("Inicio: ${sdf.format(fechaInicio)}", color = Color.White, fontSize = 12.sp) }
+
+            OutlinedButton(
+                onClick = {
+                    val cal = Calendar.getInstance().apply { time = fechaFin }
+                    DatePickerDialog(context, { _, y, m, d ->
+                        fechaFin = Calendar.getInstance().apply {
+                            set(y, m, d, 23, 59, 59)
+                        }.time
+                    }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+                },
+                modifier = Modifier.weight(1f)
+            ) { Text("Fin: ${sdf.format(fechaFin)}", color = Color.White, fontSize = 12.sp) }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ReporteCard("Ingresos", totalIngresos, Color(0xFF4CAF50), Modifier.weight(1f))
+            ReporteCard("Gastos", totalGastos, Color(0xFFFF5252), Modifier.weight(1f))
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            EstadoCard("Pendientes", pendientes, Color.Yellow.copy(0.8f), Modifier.weight(1f))
+            EstadoCard("Rechazados", rechazados, Color.Red.copy(0.8f), Modifier.weight(1f))
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+        Text("Gastos por categoria", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
+        if (porCategoria.isEmpty()) {
+            Text("No hay datos suficientes para generar el reporte.", color = Color.White.copy(0.5f), modifier = Modifier.padding(top = 18.dp))
+        } else {
+            porCategoria.forEach { (categoria, total) ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp).background(Color.White.copy(0.06f), RoundedCornerShape(14.dp)).padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(getIconForCategory(categoria, false), contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(categoria, color = Color.White)
+                    }
+                    Text("\$${String.format("%.2f", total)}", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ReporteCard(titulo: String, monto: Double, color: Color, modifier: Modifier = Modifier) {
+    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.08f)), shape = RoundedCornerShape(16.dp)) {
+        Column(modifier = Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(titulo, color = color, fontWeight = FontWeight.Bold)
+            Text("\$${String.format("%.2f", monto)}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun EstadoCard(titulo: String, total: Int, color: Color, modifier: Modifier = Modifier) {
+    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.08f)), shape = RoundedCornerShape(16.dp)) {
+        Column(modifier = Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(titulo, color = color, fontWeight = FontWeight.Bold)
+            Text(total.toString(), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
 fun TransaccionesView(
     esIngreso: Boolean,
     ingresos: List<Ingreso>,
@@ -984,7 +1090,12 @@ fun TransaccionesView(
         )
 
         if (soloLectura) {
-            Text("Modo tutor: solo lectura", color = Color.White.copy(0.75f), fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+            Text(
+                if (esIngreso) "Modo tutor: puedes registrar apoyos" else "Modo tutor: aprueba o rechaza gastos altos",
+                color = Color.White.copy(0.75f),
+                fontSize = 13.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
         }
 
         TextField(
@@ -1043,6 +1154,14 @@ fun TransaccionesView(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(item.concepto, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Text(sdf.format(item.fecha), color = Color.White.copy(0.5f), fontSize = 12.sp)
+                                if (!esIngreso && item is Gasto && item.estado != "APROBADO") {
+                                    Text(
+                                        "Estado: ${item.estado}",
+                                        color = if (item.estado == "PENDIENTE") Color.Yellow else Color.Red.copy(0.8f),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                             Text(
                                 "\$${String.format("%.2f", cantidadMostrada)}",
@@ -1051,7 +1170,32 @@ fun TransaccionesView(
                                 fontSize = 16.sp
                             )
 
-                            if (!soloLectura) {
+                            if (soloLectura && !esIngreso && item is Gasto && item.estado == "PENDIENTE") {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    TextButton(onClick = {
+                                        db.actualizarEstadoGasto(item.id, "APROBADO")
+                                        onUpdate()
+                                        scope.launch {
+                                            try {
+                                                firestore.actualizarEstadoGasto(usuarioDatos, item.id, "APROBADO")
+                                            } catch (e: Exception) {
+                                                mensajeDialogo = mensajeFirestore(e)
+                                            }
+                                        }
+                                    }) { Text("Aprobar", color = Color.Green, fontSize = 12.sp) }
+                                    TextButton(onClick = {
+                                        db.actualizarEstadoGasto(item.id, "RECHAZADO")
+                                        onUpdate()
+                                        scope.launch {
+                                            try {
+                                                firestore.actualizarEstadoGasto(usuarioDatos, item.id, "RECHAZADO")
+                                            } catch (e: Exception) {
+                                                mensajeDialogo = mensajeFirestore(e)
+                                            }
+                                        }
+                                    }) { Text("Rechazar", color = Color.Red, fontSize = 12.sp) }
+                                }
+                            } else if (!soloLectura) {
                                 IconButton(onClick = { itemAEliminar = item }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(0.5f), modifier = Modifier.size(20.dp))
                                 }
@@ -1062,13 +1206,13 @@ fun TransaccionesView(
             }
         }
 
-        if (!soloLectura) {
+        if (!soloLectura || esIngreso) {
             Button(
                 onClick = { mostrarForm = true },
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 shape = RoundedCornerShape(10.dp)
             ) {
-                Text("Anadir ${if (esIngreso) "Ingreso" else "Gasto"}")
+                Text(if (soloLectura && esIngreso) "Registrar apoyo al estudiante" else "Anadir ${if (esIngreso) "Ingreso" else "Gasto"}")
             }
         }
     }
@@ -1076,7 +1220,11 @@ fun TransaccionesView(
     if (mostrarForm) {
         FormularioDialog(esIngreso, onDismiss = { mostrarForm = false }) { concepto, monto, fecha ->
             if (esIngreso) {
-                val id = db.insertarIngreso(concepto, monto, fecha)
+                val id = if (soloLectura) {
+                    db.insertarIngresoParaUsuario(usuarioDatos, concepto, monto, fecha)
+                } else {
+                    db.insertarIngreso(concepto, monto, fecha)
+                }
                 onUpdate()
                 if (id.isNotEmpty()) {
                     scope.launch {
@@ -1091,9 +1239,10 @@ fun TransaccionesView(
                 val id = db.insertarGasto(concepto, monto, fecha)
                 onUpdate()
                 if (id.isNotEmpty()) {
+                    val estado = if (monto >= LIMITE_GASTO_ALTO) "PENDIENTE" else "APROBADO"
                     scope.launch {
                         try {
-                            firestore.guardarGasto(usuarioDatos, Gasto(id, fecha, concepto, monto))
+                            firestore.guardarGasto(usuarioDatos, Gasto(id, fecha, concepto, monto, estado))
                         } catch (e: Exception) {
                             mensajeDialogo = mensajeFirestore(e)
                         }
@@ -1124,11 +1273,13 @@ fun TransaccionesView(
                     }
                 }
             } else {
+                val estado = if (monto >= LIMITE_GASTO_ALTO) "PENDIENTE" else "APROBADO"
                 db.actualizarGasto(item.id, concepto, monto, fecha)
+                db.actualizarEstadoGasto(item.id, estado)
                 onUpdate()
                 scope.launch {
                     try {
-                        firestore.guardarGasto(usuarioDatos, Gasto(item.id, fecha, concepto, monto))
+                        firestore.guardarGasto(usuarioDatos, Gasto(item.id, fecha, concepto, monto, estado))
                     } catch (e: Exception) {
                         mensajeDialogo = mensajeFirestore(e)
                     }

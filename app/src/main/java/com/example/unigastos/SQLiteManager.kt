@@ -18,7 +18,8 @@ data class Gasto(
     override val id: String,
     override val fecha: Date,
     override val concepto: String,
-    override val cantidad: Double
+    override val cantidad: Double,
+    val estado: String = "APROBADO"
 ) : Transaccion
 
 data class Ingreso(
@@ -47,7 +48,7 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE usuarios (nombre TEXT PRIMARY KEY, password TEXT, activo INTEGER DEFAULT 0, rol TEXT DEFAULT 'USUARIO', vinculado_a TEXT)")
-        db.execSQL("CREATE TABLE gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, remote_id TEXT UNIQUE, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
+        db.execSQL("CREATE TABLE gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, remote_id TEXT UNIQUE, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT, estado TEXT DEFAULT 'APROBADO')")
         db.execSQL("CREATE TABLE ingresos (id INTEGER PRIMARY KEY AUTOINCREMENT, remote_id TEXT UNIQUE, concepto TEXT, cantidad REAL, fecha INTEGER, usuario_nombre TEXT)")
     }
 
@@ -68,6 +69,7 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         if (oldVersion < 6) {
             try { db.execSQL("ALTER TABLE gastos ADD COLUMN remote_id TEXT") } catch (_: Exception) {}
             try { db.execSQL("ALTER TABLE ingresos ADD COLUMN remote_id TEXT") } catch (_: Exception) {}
+            try { db.execSQL("ALTER TABLE gastos ADD COLUMN estado TEXT DEFAULT 'APROBADO'") } catch (_: Exception) {}
             db.execSQL("UPDATE gastos SET remote_id = 'local-gasto-' || id WHERE remote_id IS NULL OR remote_id = ''")
             db.execSQL("UPDATE ingresos SET remote_id = 'local-ingreso-' || id WHERE remote_id IS NULL OR remote_id = ''")
         }
@@ -90,7 +92,9 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
             agregarColumnaSiFalta(db, "gastos", "remote_id", "TEXT")
             agregarColumnaSiFalta(db, "gastos", "concepto", "TEXT DEFAULT 'Gasto'")
             agregarColumnaSiFalta(db, "gastos", "usuario_nombre", "TEXT")
+            agregarColumnaSiFalta(db, "gastos", "estado", "TEXT DEFAULT 'APROBADO'")
             db.execSQL("UPDATE gastos SET remote_id = 'local-gasto-' || id WHERE remote_id IS NULL OR remote_id = ''")
+            db.execSQL("UPDATE gastos SET estado = 'APROBADO' WHERE estado IS NULL OR estado = ''")
         }
         if (tablaExiste(db, "ingresos")) {
             agregarColumnaSiFalta(db, "ingresos", "remote_id", "TEXT")
@@ -212,6 +216,7 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
             put("cantidad", cantidad)
             put("fecha", fecha.time)
             put("usuario_nombre", info.nombre)
+            put("estado", if (cantidad >= LIMITE_GASTO_ALTO) "PENDIENTE" else "APROBADO")
         }
         writableDatabase.insert("gastos", null, values)
         return remoteId
@@ -232,7 +237,8 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                         ?: cursor.getInt(cursor.getColumnIndexOrThrow("id")).toString(),
                     Date(cursor.getLong(cursor.getColumnIndexOrThrow("fecha"))),
                     cursor.getString(cursor.getColumnIndexOrThrow("concepto")) ?: "Gasto",
-                    cursor.getDouble(cursor.getColumnIndexOrThrow("cantidad"))
+                    cursor.getDouble(cursor.getColumnIndexOrThrow("cantidad")),
+                    cursor.getString(cursor.getColumnIndexOrThrow("estado")) ?: "APROBADO"
                 )
             )
         }
@@ -257,16 +263,27 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         writableDatabase.delete("gastos", "remote_id = ? OR id = ?", arrayOf(id, id))
     }
 
+    fun actualizarEstadoGasto(id: String, estado: String) {
+        val values = ContentValues().apply {
+            put("estado", estado)
+        }
+        writableDatabase.update("gastos", values, "remote_id = ? OR id = ?", arrayOf(id, id))
+    }
+
     fun insertarIngreso(concepto: String, cantidad: Double, fecha: Date): String {
         val info = obtenerUsuarioActivoInfo() ?: return ""
         if (info.rol == "TUTOR") return ""
+        return insertarIngresoParaUsuario(info.nombre, concepto, cantidad, fecha)
+    }
+
+    fun insertarIngresoParaUsuario(usuarioNombre: String, concepto: String, cantidad: Double, fecha: Date): String {
         val remoteId = UUID.randomUUID().toString()
         val values = ContentValues().apply {
             put("remote_id", remoteId)
             put("concepto", concepto)
             put("cantidad", cantidad)
             put("fecha", fecha.time)
-            put("usuario_nombre", info.nombre)
+            put("usuario_nombre", usuarioNombre)
         }
         writableDatabase.insert("ingresos", null, values)
         return remoteId
@@ -345,6 +362,7 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                     put("cantidad", gasto.cantidad)
                     put("fecha", gasto.fecha.time)
                     put("usuario_nombre", usuarioNombre)
+                    put("estado", gasto.estado)
                 }
                 db.insertWithOnConflict("gastos", null, values, SQLiteDatabase.CONFLICT_REPLACE)
             }
@@ -354,3 +372,5 @@ class SQLiteManager(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         }
     }
 }
+
+const val LIMITE_GASTO_ALTO = 5000.0

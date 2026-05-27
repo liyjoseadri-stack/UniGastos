@@ -101,6 +101,20 @@ class FirestoreManager private constructor() {
         usuarios().document(usuario).collection("gastos").document(id).delete().esperar()
     }
 
+    suspend fun actualizarEstadoGasto(usuario: String, id: String, estado: String) {
+        usuarios()
+            .document(usuario)
+            .collection("gastos")
+            .document(id)
+            .update(
+                mapOf(
+                    "estado" to estado,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            .esperar()
+    }
+
     suspend fun subirDatosLocales(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>) {
         val batch = firestore.batch()
         ingresos.forEach { ingreso ->
@@ -189,7 +203,8 @@ class FirestoreManager private constructor() {
                         id = doc.id,
                         fecha = doc.readDate(),
                         concepto = doc.getString("concepto") ?: "Gasto",
-                        cantidad = doc.getDouble("cantidad") ?: 0.0
+                        cantidad = doc.getDouble("cantidad") ?: 0.0,
+                        estado = doc.getString("estado") ?: "APROBADO"
                     )
                 }.orEmpty())
             }
@@ -211,6 +226,7 @@ class FirestoreManager private constructor() {
             "concepto" to concepto,
             "cantidad" to cantidad,
             "fecha" to Timestamp(fecha),
+            "estado" to estado,
             "updatedAt" to FieldValue.serverTimestamp()
         )
     }
