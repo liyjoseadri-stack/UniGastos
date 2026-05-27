@@ -47,8 +47,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.compose.material.icons.extended)
-    implementation(libs.firebase.firestore)
-    implementation(libs.kotlinx.coroutines.play.services)
+    implementation("com.google.firebase:firebase-firestore:26.3.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

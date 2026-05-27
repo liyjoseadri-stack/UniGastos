@@ -1,12 +1,17 @@
 package com.example.unigastos
 
+import android.Manifest
 import android.app.DatePickerDialog
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -57,6 +62,8 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NotificacionesManager.crearCanal(this)
+        solicitarPermisoNotificaciones()
         enableEdgeToEdge()
         setContent {
             UniGastosTheme {
@@ -80,6 +87,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    private fun solicitarPermisoNotificaciones() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
         }
     }
 }
@@ -559,7 +574,7 @@ fun HomeScreen(nombre: String, navController: NavHostController, db: SQLiteManag
             modifier = Modifier.weight(1f)
         ) { targetVista ->
             when (targetVista) {
-                "Resumen" -> ResumenView(usuarioDatos, ingresos, gastos, soloLectura)
+            "Resumen" -> ResumenView(usuarioDatos, ingresos, gastos, soloLectura, firestore)
                 "Ingresos" -> TransaccionesView(true, ingresos, emptyList(), db, firestore, usuarioDatos, soloLectura) {
                     ingresos = db.obtenerIngresosDeUsuario(usuarioDatos)
                 }
@@ -609,11 +624,19 @@ fun RowScope.TabItem(text: String, activo: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun ResumenView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>, soloLectura: Boolean) {
+fun ResumenView(
+    usuario: String,
+    ingresos: List<Ingreso>,
+    gastos: List<Gasto>,
+    soloLectura: Boolean,
+    firestore: FirestoreManager
+) {
     var filtro by remember { mutableStateOf("Mes") }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("UniGastosPrefs", android.content.Context.MODE_PRIVATE) }
     val budgetKey = "presupuesto_$usuario"
+    val notificationKey = "notificacion_presupuesto_$usuario"
     var presupuestoInput by remember { mutableStateOf(prefs.getString(budgetKey, "") ?: "") }
     val presupuesto = presupuestoInput.toDoubleOrNull() ?: 0.0
 
@@ -623,6 +646,35 @@ fun ResumenView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>, s
     val totalG = gastosF.sumOf { it.cantidad }
     val balance = totalI - totalG
     val scrollState = rememberScrollState()
+
+    DisposableEffect(usuario) {
+        val listener = firestore.observarPresupuesto(
+            usuario = usuario,
+            onChange = { monto ->
+                val nuevoValor = if (monto > 0) monto.toString() else ""
+                presupuestoInput = nuevoValor
+                prefs.edit().putString(budgetKey, nuevoValor).apply()
+            },
+            onError = {}
+        )
+        onDispose { listener.remove() }
+    }
+
+    LaunchedEffect(usuario, totalG, presupuesto, soloLectura) {
+        val yaNotificado = prefs.getBoolean(notificationKey, false)
+        if (presupuesto > 0 && totalG > presupuesto && !yaNotificado) {
+            NotificacionesManager.notificarPresupuestoExcedido(
+                context = context,
+                usuario = usuario,
+                totalGastos = totalG,
+                presupuesto = presupuesto,
+                esTutor = soloLectura
+            )
+            prefs.edit().putBoolean(notificationKey, true).apply()
+        } else if (presupuesto <= 0 || totalG <= presupuesto) {
+            prefs.edit().putBoolean(notificationKey, false).apply()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -682,9 +734,14 @@ fun ResumenView(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>, s
                             if (it.isEmpty() || it.matches(Regex("^\\d*\\.?\\d*$"))) {
                                 presupuestoInput = it
                                 prefs.edit().putString(budgetKey, it).apply()
+                                val presupuestoNuevo = it.toDoubleOrNull() ?: 0.0
+                                scope.launch {
+                                    try {
+                                        firestore.guardarPresupuesto(usuario, presupuestoNuevo)
+                                    } catch (_: Exception) {}
+                                }
                             }
                         },
-                        enabled = !soloLectura,
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("Definir meta de ahorro", color = Color.Gray, fontSize = 14.sp) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),

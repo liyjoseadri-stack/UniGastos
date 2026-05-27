@@ -6,8 +6,11 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
-import kotlinx.coroutines.tasks.await
+import com.google.android.gms.tasks.Task
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.Date
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class FirestoreManager private constructor() {
 
@@ -25,7 +28,7 @@ class FirestoreManager private constructor() {
     }
 
     suspend fun usuarioExiste(nombre: String): Boolean {
-        return usuarios().document(nombre).get().await().exists()
+        return usuarios().document(nombre).get().esperar().exists()
     }
 
     suspend fun registrarAlumnoYTutor(
@@ -57,12 +60,12 @@ class FirestoreManager private constructor() {
                 "updatedAt" to FieldValue.serverTimestamp()
             )
         )
-        batch.commit().await()
+        batch.commit().esperar()
         return true
     }
 
     suspend fun validarCredenciales(nombre: String, password: String): UsuarioInfo? {
-        val doc = usuarios().document(nombre).get().await()
+        val doc = usuarios().document(nombre).get().esperar()
         if (!doc.exists()) return null
         if ((doc.getString("password") ?: "") != password) return null
         return UsuarioInfo(
@@ -78,7 +81,7 @@ class FirestoreManager private constructor() {
             .collection("ingresos")
             .document(ingreso.id)
             .set(ingreso.toFirestoreMap())
-            .await()
+            .esperar()
     }
 
     suspend fun guardarGasto(usuario: String, gasto: Gasto) {
@@ -87,15 +90,15 @@ class FirestoreManager private constructor() {
             .collection("gastos")
             .document(gasto.id)
             .set(gasto.toFirestoreMap())
-            .await()
+            .esperar()
     }
 
     suspend fun eliminarIngreso(usuario: String, id: String) {
-        usuarios().document(usuario).collection("ingresos").document(id).delete().await()
+        usuarios().document(usuario).collection("ingresos").document(id).delete().esperar()
     }
 
     suspend fun eliminarGasto(usuario: String, id: String) {
-        usuarios().document(usuario).collection("gastos").document(id).delete().await()
+        usuarios().document(usuario).collection("gastos").document(id).delete().esperar()
     }
 
     suspend fun subirDatosLocales(usuario: String, ingresos: List<Ingreso>, gastos: List<Gasto>) {
@@ -106,7 +109,40 @@ class FirestoreManager private constructor() {
         gastos.forEach { gasto ->
             batch.set(usuarios().document(usuario).collection("gastos").document(gasto.id), gasto.toFirestoreMap())
         }
-        batch.commit().await()
+        batch.commit().esperar()
+    }
+
+    suspend fun guardarPresupuesto(usuario: String, presupuesto: Double) {
+        usuarios()
+            .document(usuario)
+            .collection("configuracion")
+            .document("presupuesto")
+            .set(
+                mapOf(
+                    "monto" to presupuesto,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            .esperar()
+    }
+
+    fun observarPresupuesto(
+        usuario: String,
+        onChange: (Double) -> Unit,
+        onError: (Exception) -> Unit
+    ): ListenerRegistration {
+        return usuarios()
+            .document(usuario)
+            .collection("configuracion")
+            .document("presupuesto")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(error)
+                    return@addSnapshotListener
+                }
+                val monto = snapshot?.getDouble("monto") ?: 0.0
+                onChange(monto)
+            }
     }
 
     fun observarIngresos(
@@ -181,6 +217,20 @@ class FirestoreManager private constructor() {
 
     private fun com.google.firebase.firestore.DocumentSnapshot.readDate(): Date {
         return getTimestamp("fecha")?.toDate() ?: Date(getLong("fecha") ?: System.currentTimeMillis())
+    }
+}
+
+private suspend fun <T> Task<T>.esperar(): T {
+    return suspendCancellableCoroutine { continuation ->
+        addOnSuccessListener { result ->
+            continuation.resume(result)
+        }
+        addOnFailureListener { exception ->
+            continuation.resumeWithException(exception)
+        }
+        addOnCanceledListener {
+            continuation.cancel()
+        }
     }
 }
 
